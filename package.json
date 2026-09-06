@@ -1,7 +1,7 @@
 {
   "name": "turntrail-workspace",
   "private": true,
-  "version": "0.17.5",
+  "version": "0.17.6",
   "description": "Vendor-neutral handoff layer for continuing developer agent sessions across Codex, Claude, and other tools.",
   "type": "module",
   "workspaces": [

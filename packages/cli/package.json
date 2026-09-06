@@ -1,6 +1,6 @@
 {
   "name": "turntrail",
-  "version": "0.17.5",
+  "version": "0.17.6",
   "description": "CLI for Turntrail, a local handoff layer for agentic coding sessions.",
   "type": "module",
   "bin": {
@@ -8,7 +8,7 @@
     "context-bridge": "bin/turntrail.js"
   },
   "dependencies": {
-    "@turntrail/core": "0.17.5"
+    "@turntrail/core": "0.17.6"
   },
   "license": "MIT",
   "engines": {

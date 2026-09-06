@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "product": "Turntrail",
-  "extensionVersion": "0.17.5",
-  "sourceCommit": "a7b209473c0a4e078cddfc3b7ef6261cdf829787",
-  "createdAt": "2026-09-06T12:59:44.786Z",
+  "extensionVersion": "0.17.6",
+  "sourceCommit": "5830d0d70173191e9c506b09f80cf56155fd7ad0",
+  "createdAt": "2026-09-06T13:05:11.327Z",
   "syntheticData": true,
   "viewport": {
     "width": 1600,
@@ -12,8 +12,8 @@
   "files": [
     {
       "file": "01-cross-agent-handoff.png",
-      "sha256": "1effb5098bf088113e75b4dc7096b1fc6de04bbbe47b29368aa36ec3091ecfcc",
-      "bytes": 105415
+      "sha256": "6156397376c5df295b2558e879b983c813087e6f57826125a908c6e10ea359d7",
+      "bytes": 105831
     },
     {
       "file": "02-account-quotas.png",
@@ -22,13 +22,13 @@
     },
     {
       "file": "03-claude-accounts.png",
-      "sha256": "cb5851f7831768a1edea0a0ffcf141a5592e226674bc43251dbaee75514caf87",
-      "bytes": 105207
+      "sha256": "17af6b0452999bce894f43161a5f2bf90e15cc0a18bcec2885572dfca1079789",
+      "bytes": 105211
     },
     {
       "file": "04-local-handoff.png",
-      "sha256": "9705074474e5fb3b2f04bcf322fe25c62df15f441c65b3859e021d63c64ab36f",
-      "bytes": 159585
+      "sha256": "757fa70db5b8ec51909eba8928adc5eb4d66c772649b1b3b5b55d6b8aac84298",
+      "bytes": 159658
     }
   ]
 }

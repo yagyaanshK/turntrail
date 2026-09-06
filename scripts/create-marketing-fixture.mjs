@@ -22,8 +22,8 @@ await Promise.all([
 ]);
 
 const sessions = [
-  session('claude-api-errors', 'anthropic', 'ide', 'Trace intermittent API errors', 8),
-  session('codex-dashboard', 'openai', 'ide', 'Refactor the analytics dashboard', 21),
+  session('claude-api-errors', 'anthropic', 'ide', 'Trace intermittent API errors', 21),
+  session('codex-dashboard', 'openai', 'ide', 'Refactor the analytics dashboard', 8),
   session('gemini-accessibility', 'google', 'cli', 'Review keyboard accessibility', 34),
   session('cursor-test-suite', 'cursor', 'ide', 'Expand the integration test suite', 57)
 ];
