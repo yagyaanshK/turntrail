@@ -273,7 +273,7 @@ class LoginPanel {
   }
 
   async importClaudeCurrent(signal) {
-    const { importClaudeAuth, defaultClaudeHome, backfillClaudeProfile } = await this.core();
+    const { importClaudeAuth, defaultClaudeHome, backfillClaudeProfile, updateAccount } = await this.core();
     const accountId = await this.ensureAccount();
     this.post({ type: 'running', method: 'import' });
 
@@ -283,6 +283,11 @@ class LoginPanel {
       if (error?.code === 'PROVIDER_CONTRACT_CHANGED') throw error;
       return auth;
     })) || auth;
+
+    // This credential came from Claude Code's live home, so it is already the
+    // login in use. Record that fact instead of offering to apply it back to
+    // the same file.
+    await updateAccount(accountId, { lastUsedAt: new Date().toISOString() });
 
     await this.store.reloadUsage({ force: true, signal });
     this.commitProvisional();

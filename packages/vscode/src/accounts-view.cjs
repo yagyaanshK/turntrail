@@ -17,6 +17,13 @@ const PROVIDERS = [
   { id: 'claude', title: 'Claude Code', noun: 'account' }
 ];
 
+function loginNeedsUpdate(account, activeId, hasAuthenticationIssue = false) {
+  const signedInAt = Date.parse(account.signedInAt || '');
+  const lastUsedAt = Date.parse(account.lastUsedAt || '');
+  return !hasAuthenticationIssue && account.id === activeId &&
+    Number.isFinite(signedInAt) && Number.isFinite(lastUsedAt) && signedInAt > lastUsedAt;
+}
+
 class AccountsStore {
   constructor(core) {
     this.core = core;
@@ -128,10 +135,7 @@ class AccountsStore {
     const requiresRevalidation = usage?.requiresRevalidation === true;
     const hasAuthenticationIssue = requiresSignIn || requiresRevalidation;
     const windows = hasAuthenticationIssue ? [] : (usage?.windows || []);
-    const signedInAt = Date.parse(account.signedInAt || '');
-    const lastUsedAt = Date.parse(account.lastUsedAt || '');
-    const needsActivation = !hasAuthenticationIssue && account.id === this.activeIds[provider.id] &&
-      Number.isFinite(signedInAt) && (!Number.isFinite(lastUsedAt) || signedInAt > lastUsedAt);
+    const needsActivation = loginNeedsUpdate(account, this.activeIds[provider.id], hasAuthenticationIssue);
     return {
       id: account.id,
       provider: provider.id,
@@ -664,7 +668,7 @@ function renderRow(row) {
   const provider = esc(row.provider);
 
   let status;
-  if (row.needsActivation) status = 'Sign-in ready to apply';
+  if (row.needsActivation) status = 'New sign-in ready';
   else if (row.requiresRevalidation) status = row.active ? 'Selected login needs repair' : 'Login needs verification';
   else if (!row.signedIn) status = row.active ? 'Selected login needs sign-in' : 'Not signed in';
   else if (row.error) status = esc(row.error);
@@ -727,7 +731,7 @@ function renderRow(row) {
     '</div>' +
     '<div class="actions">' +
       (row.needsActivation
-        ? act('switch', 'Apply login', 'primary')
+        ? act('switch', 'Update ' + (row.provider === 'claude' ? 'Claude' : 'Codex') + ' login', 'primary')
         : (row.requiresRevalidation
             ? act('switch', row.active ? 'Repair login' : 'Verify & use', 'primary')
             : (row.active || !row.signedIn ? '' : act('switch', 'Use this', 'primary')))) +
@@ -923,4 +927,4 @@ if (saved) {
 </html>`;
 }
 
-module.exports = { AccountsStore, AccountsWebview, PROVIDERS };
+module.exports = { AccountsStore, AccountsWebview, PROVIDERS, loginNeedsUpdate };

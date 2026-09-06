@@ -216,7 +216,7 @@ credentials.
 | Action | Effect |
 |--------|--------|
 | **Use this** | Points that agent's official CLI and extension at this account. |
-| **Repair login / Apply login** | Verifies a rejected login, or applies credentials created by signing in again, using the same guarded switch flow. |
+| **Repair login / Update Claude login / Update Codex login** | Verifies a rejected login, or updates the official client with credentials created by signing in again, using the same guarded switch flow. |
 | **Terminal** | Starts the agent as that account without changing the machine default. |
 | **Sign in** | Opens the sign-in panel for that agent. |
 | **↻** (on each card) | Refreshes just that account — and for Codex, renews its token in the process, so it doubles as waking a stale login. |

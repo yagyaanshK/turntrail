@@ -474,6 +474,10 @@ async function importAccount(item) {
       return auth;
     })) || auth;
 
+    // Import reads the official client's live credential, so the imported
+    // account is already selected. Do not present it as waiting to be applied.
+    await api.updateAccount(account.id, { lastUsedAt: new Date().toISOString() });
+
     await accountsProvider.reloadUsage({ force: true });
     vscode.window.showInformationMessage(
       `Turntrail: imported ${auth?.claims?.email || auth?.email || label.trim()} as "${account.label}". The original login is untouched.`

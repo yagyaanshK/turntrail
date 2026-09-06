@@ -371,8 +371,9 @@ unreachable verification leaves the current Codex login unchanged and does not r
 The queued request expires after 15 minutes and contains only an account id, bounded process
 metadata, and the editor path needed for relaunch — never credentials. If the provider restarts
 before the quiet period or the request expires, the live credential is left unchanged. After signing
-in again to an account that is already selected, **Apply login** runs the same guarded verification
-and replacement so the repaired managed credential reaches the official Codex clients.
+in again to an account that is already selected, **Update Claude login** or **Update Codex login**
+runs the same guarded verification and replacement so the repaired managed credential reaches the
+official client.
 
 The account in use is marked in the panel and shown in the status bar with its remaining quota.
 Every account stays signed in, so this is cheap and reversible; the toast offers **Undo**. To use an

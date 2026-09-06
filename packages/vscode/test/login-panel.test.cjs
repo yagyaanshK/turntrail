@@ -93,3 +93,29 @@ test('cancelling a login aborts its work and rolls back the provisional account'
   assert.equal(removals.length, 1);
   assert.equal(removals[0].options.purgeLive, false);
 });
+
+test('importing Claude current login records it as already applied', async () => {
+  const updates = [];
+  const reloads = [];
+  const panel = new LoginPanel(
+    {},
+    async () => ({
+      ensureClaudeHome: async () => {},
+      defaultClaudeHome: () => 'live-claude-home',
+      importClaudeAuth: async () => ({ email: 'person@example.com' }),
+      backfillClaudeProfile: async () => ({ email: 'person@example.com' }),
+      updateAccount: async (id, patch) => updates.push({ id, patch })
+    }),
+    { reloadUsage: async (options) => reloads.push(options) }
+  );
+  panel.provider = 'claude';
+  panel.target = { provider: 'claude', accountId: 'claude-1', label: 'Claude 1' };
+
+  await panel.importClaudeCurrent(new AbortController().signal);
+
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].id, 'claude-1');
+  assert.ok(Number.isFinite(Date.parse(updates[0].patch.lastUsedAt)));
+  assert.equal(reloads.length, 1);
+  assert.equal(reloads[0].force, true);
+});

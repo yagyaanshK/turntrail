@@ -127,7 +127,7 @@ or retries the redemption POST.
 | Action | Effect |
 |--------|--------|
 | **Use this** | Points that agent's official CLI and extension at this account (machine-wide). |
-| **Repair login / Apply login** | Validates a rejected Codex login, or applies a newly completed sign-in to the selected account. |
+| **Repair login / Update Claude login / Update Codex login** | Validates a rejected login, or updates the official client after a newly completed sign-in to the selected account. |
 | **Terminal** | Starts the agent as that account without changing the machine default. |
 | **Sign in** | Opens the sign-in panel for that agent. |
 | **Refresh now** | Forces a usage read; otherwise readings are cached for five minutes. |
@@ -208,7 +208,7 @@ Codex activation validates an OAuth account by rotating its refresh token before
 even if the access-token JWT has not reached its local expiry. This catches credentials revoked by
 OpenAI or renewed elsewhere. A usage-endpoint `401` is shown as a repairable verification state;
 Turntrail offers both **Repair login** and a fresh **Sign in**. If a fresh sign-in belongs to the
-account already selected in `~/.codex/auth.json`, **Apply login** performs the guarded replacement.
+account already selected in `~/.codex/auth.json`, **Update Codex login** performs the guarded replacement.
 
 ## The Handoff Card
 
