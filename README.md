@@ -50,20 +50,6 @@ Then in your editor run **“Extensions: Install from VSIX…”** and pick
 Google Antigravity). Generated VSIX files are release artifacts and are not committed to the source
 tree.
 
-### Upgrading from Context Bridge
-
-Turntrail preserves the previous interfaces so the rename does not discard local history:
-
-- Existing `.context-bridge/` project ledgers and `~/.context-bridge/` account stores are detected and used in place. New projects and new account stores use `.turntrail/`.
-- The old `context-bridge` executable remains an alias for `turntrail`.
-- Existing `contextBridge.*` VS Code settings and command ids remain supported. New configuration and commands use `turntrail.*`.
-- The Marketplace extension id is `turntrail.turntrail`. Pre-release VSIX builds used
-  `yagyaanshK.context-bridge-vscode`; uninstall that build when moving to the Marketplace version.
-
-No manual data migration is required. If both old and new storage directories exist in the same location, Turntrail uses `.turntrail/` and leaves `.context-bridge/` untouched.
-
----
-
 ## Quick start (CLI)
 
 ```bash
