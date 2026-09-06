@@ -12,6 +12,26 @@ Turntrail is a local, vendor-neutral handoff layer for developers who switch bet
 
 ---
 
+## See Turntrail in action
+
+Find the exact conversation and continue it in another agent:
+
+![Turntrail Sessions view with Claude, Codex, Gemini, and Cursor conversations and cross-agent handoff controls](packages/vscode/media/marketplace/01-cross-agent-handoff.png)
+
+See quota across Codex subscriptions, switch the active login, and use banked resets:
+
+![Turntrail Accounts view showing three Codex subscriptions, quota windows, and a banked reset](packages/vscode/media/marketplace/02-account-quotas.png)
+
+Keep multiple Claude Code accounts signed in and ready to use:
+
+![Turntrail Accounts view showing two Claude Code accounts and their usage windows](packages/vscode/media/marketplace/03-claude-accounts.png)
+
+Review the deterministic local handoff before the next agent reads it:
+
+![A Turntrail handoff document open beside the unified Sessions view](packages/vscode/media/marketplace/04-local-handoff.png)
+
+---
+
 ## The problem
 
 You use more than one coding agent in the same project — one is better at refactors, another at UI, another at review. The pain is **continuity**: after a real session in one tool, the next tool starts with partial context, stale assumptions, or a lossy summary.

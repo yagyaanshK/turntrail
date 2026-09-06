@@ -11,3 +11,6 @@ npm-debug.log*
 .tmp/
 dist/stage-vscode/
 dist/*.vsix
+
+# Disposable profiles and credentials used to capture marketing screenshots.
+.marketing-capture/

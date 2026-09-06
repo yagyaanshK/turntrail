@@ -15,6 +15,24 @@ and usage endpoints; no transcript content is ever sent anywhere.
 
 Works in VS Code and compatible forks (Cursor, Windsurf, Google Antigravity).
 
+## See it in action
+
+Find the exact conversation and continue it in another agent:
+
+![Turntrail Sessions view with Claude, Codex, Gemini, and Cursor conversations and cross-agent handoff controls](media/marketplace/01-cross-agent-handoff.png)
+
+See quota across Codex subscriptions, switch the active login, and use banked resets:
+
+![Turntrail Accounts view showing three Codex subscriptions, quota windows, and a banked reset](media/marketplace/02-account-quotas.png)
+
+Keep multiple Claude Code accounts signed in and ready to use:
+
+![Turntrail Accounts view showing two Claude Code accounts and their usage windows](media/marketplace/03-claude-accounts.png)
+
+Review the deterministic local handoff before the next agent reads it:
+
+![A Turntrail handoff document open beside the unified Sessions view](media/marketplace/04-local-handoff.png)
+
 ## Use it
 
 1. Open the Turntrail icon in the activity bar and expand **Sessions**.

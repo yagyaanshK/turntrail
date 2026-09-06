@@ -14,7 +14,9 @@
     "test:vscode-integration": "node scripts/test-vscode-integration.mjs",
     "lint": "node scripts/check-syntax.mjs && node scripts/check-webview-scripts.mjs && node scripts/check-packages.mjs",
     "check:packages": "node scripts/check-packages.mjs",
-    "package:vscode": "node scripts/package-vscode.mjs"
+    "package:vscode": "node scripts/package-vscode.mjs",
+    "marketing:fixture": "node scripts/create-marketing-fixture.mjs",
+    "marketing:capture": "node scripts/capture-marketplace-screenshots.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -22,6 +24,7 @@
   "license": "MIT",
   "devDependencies": {
     "@vscode/test-electron": "^3.1.0",
-    "@vscode/vsce": "^3.9.2"
+    "@vscode/vsce": "^3.9.2",
+    "chrome-remote-interface": "^0.33.3"
   }
 }

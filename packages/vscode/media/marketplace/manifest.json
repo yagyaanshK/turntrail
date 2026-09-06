@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "product": "Turntrail",
+  "extensionVersion": "0.17.5",
+  "sourceCommit": "a7b209473c0a4e078cddfc3b7ef6261cdf829787",
+  "createdAt": "2026-09-06T12:59:44.786Z",
+  "syntheticData": true,
+  "viewport": {
+    "width": 1600,
+    "height": 900
+  },
+  "files": [
+    {
+      "file": "01-cross-agent-handoff.png",
+      "sha256": "1effb5098bf088113e75b4dc7096b1fc6de04bbbe47b29368aa36ec3091ecfcc",
+      "bytes": 105415
+    },
+    {
+      "file": "02-account-quotas.png",
+      "sha256": "16a72eb88976b4f96fd36d4324c078e616dc42dadf9ecff521118a5bb73f8497",
+      "bytes": 105940
+    },
+    {
+      "file": "03-claude-accounts.png",
+      "sha256": "cb5851f7831768a1edea0a0ffcf141a5592e226674bc43251dbaee75514caf87",
+      "bytes": 105207
+    },
+    {
+      "file": "04-local-handoff.png",
+      "sha256": "9705074474e5fb3b2f04bcf322fe25c62df15f441c65b3859e021d63c64ab36f",
+      "bytes": 159585
+    }
+  ]
+}
