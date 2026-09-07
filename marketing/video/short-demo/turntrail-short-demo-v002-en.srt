@@ -1,0 +1,20 @@
+1
+00:00:00,350 --> 00:00:06,400
+Continue one coding session across agents.
+
+2
+00:00:06,550 --> 00:00:11,600
+Choose a Codex chat. Hand it off to Claude.
+
+3
+00:00:11,900 --> 00:00:18,850
+Transcript plus workspace snapshot. No AI summary.
+
+4
+00:00:19,000 --> 00:00:25,750
+See Codex and Claude usage in one place.
+
+5
+00:00:30,400 --> 00:00:35,250
+Install Turntrail free from the VS Code Marketplace.
+

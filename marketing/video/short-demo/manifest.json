@@ -3,12 +3,27 @@
   "product": "Turntrail",
   "asset": "short-demo",
   "status": "review",
-  "version": 1,
+  "version": 2,
   "extensionVersion": "0.17.6",
-  "sourceCommit": "d27736c88333cbcc6cf7ff3a443219a4cf07de18",
-  "createdAt": "2026-09-07T01:25:12.220Z",
+  "sourceCommit": "66e149bcc2806c5c2ce4c41a57d7ba1f0ecd8747",
+  "createdAt": "2026-09-07T02:30:35.606Z",
   "syntheticData": true,
-  "narration": false,
+  "liveInterfaceCapture": true,
+  "narration": {
+    "voice": "en-US-GuyNeural",
+    "accent": "American English",
+    "generatedWith": "edge-tts"
+  },
+  "cursor": {
+    "source": "Windows system pointer",
+    "normalPixels": 38,
+    "clickPixels": 58
+  },
+  "editor": {
+    "maximized": true,
+    "zoom": "reset",
+    "auxiliaryAgentPanelVisible": true
+  },
   "delivery": {
     "width": 1920,
     "height": 1080,
@@ -17,17 +32,17 @@
     "audioCodec": "aac",
     "pixelFormat": "yuv420p"
   },
-  "durationSeconds": 34.933333,
+  "durationSeconds": 36,
   "files": [
     {
-      "file": "turntrail-short-demo-v001-review-16x9.mp4",
-      "bytes": 5753029,
-      "sha256": "5540d73f186a8764032ecb912bd043b911fba0c50243530d6bd270b09b8c8b06"
+      "file": "turntrail-short-demo-v002-review-live-16x9.mp4",
+      "bytes": 2095158,
+      "sha256": "12045f18341a20a5455d2af21c56508410636e9945e01aa33246923fe49e791a"
     },
     {
-      "file": "turntrail-short-demo-v001-en.srt",
-      "bytes": 495,
-      "sha256": "c1926544e98d61703e6107989e0e43153908ce2f1b6fddeff673de239730fb4a"
+      "file": "turntrail-short-demo-v002-en.srt",
+      "bytes": 397,
+      "sha256": "82d68b48915e875704983932380a780a0a354585d77a4d5c5649c52da879cd1e"
     }
   ]
 }
