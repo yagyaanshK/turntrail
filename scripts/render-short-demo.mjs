@@ -119,9 +119,7 @@ function buildFilter() {
   captionsForVideo.forEach(([start, end, value], index) => {
     const next = `caption-${index}`;
     filters.push(
-      `[${current}]drawbox=x=790:y=930:w=680:h=78:color=0x111318@0.88:t=fill:` +
-      `enable='between(t,${start},${end})',` +
-      `${drawText(value, '(w-text_w)/2', 953, 29, 'white', false, `between(t,${start},${end})`)}[${next}]`
+      `[${current}]${captionText(value, start, end)}[${next}]`
     );
     current = next;
   });
@@ -196,6 +194,14 @@ function drawText(value, x, y, size, color, bold = false, enable) {
   const font = bold ? 'C\\:/Windows/Fonts/arialbd.ttf' : 'C\\:/Windows/Fonts/arial.ttf';
   const enabled = enable ? `:enable='${enable}'` : '';
   return `drawtext=fontfile='${font}':text='${escapeText(value)}':x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}${enabled}`;
+}
+
+function captionText(value, start, end) {
+  const font = 'C\\:/Windows/Fonts/arial.ttf';
+  return `drawtext=fontfile='${font}':text='${escapeText(value)}':` +
+    `x=(w-text_w)/2:y=953:fontsize=29:fontcolor=white:` +
+    `box=1:boxcolor=0x111318@0.88:boxborderw=22:fix_bounds=1:` +
+    `enable='between(t,${start},${end})'`;
 }
 
 function escapeText(value) {
