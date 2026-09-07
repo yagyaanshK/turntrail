@@ -14,3 +14,4 @@ dist/*.vsix
 
 # Disposable profiles and credentials used to capture marketing screenshots.
 .marketing-capture/
+.marketing-tools/

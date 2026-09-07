@@ -2,70 +2,83 @@
 
 ## Purpose
 
-Create a concise product proof for developers who switch between coding agents. The first video
-shows Turntrail finding a Codex conversation, preparing a Claude handoff, preserving the handoff as
-a local document, and displaying Codex and Claude account usage in the editor.
+This 36-second product proof shows the released Turntrail extension performing a live Codex-to-Claude
+handoff and then displaying synthetic Codex and Claude account usage. It is a real extension session,
+not a slideshow or a sequence of zoomed screenshots.
 
-The video is designed to work without sound. Captions carry the complete message, while a silent
-AAC track preserves broad social-platform compatibility. Narration can be added later without
-changing the visual edit.
+The capture keeps Turntrail on the left, a live project file and generated handoff in the editor, and
+VS Code's Agent panel on the right. The editor is maximized and its zoom is reset before recording.
 
-## Audience and CTA
+## Presentation
 
-- Audience: developers already using two or more AI coding agents.
-- Primary action: install Turntrail from the VS Code Marketplace.
-- Trust markers: real Turntrail UI, synthetic demonstration data, local deterministic handoff, free
-  and open source.
+- American English narration: `en-US-GuyNeural`, generated with `edge-tts`.
+- Social-ready audio normalized to `-16 LUFS` with a `-1.5 dB` true-peak ceiling.
+- Real Windows pointer: 38 pixels while moving and 58 pixels for 280 milliseconds around each click.
+- Smooth pointer travel between actual controls, with a quiet click sound at each action.
+- Burned-in concise captions plus a separate English SRT file.
+- A small synthetic-data label and final Marketplace call to action.
 
 ## Storyboard
 
-| Time | Visual | On-screen message |
+| Time | Live action | Narration focus |
 | --- | --- | --- |
-| 0:00-0:04 | Turntrail Sessions view, softened behind the product name | Continue one coding session across AI agents. |
-| 0:04-0:11.5 | Codex session selected with Claude handoff controls open | Find the exact Codex session you want to continue. |
-| 0:11.5-0:19 | Generated handoff open beside Sessions | Create a deterministic handoff for Claude. No AI summary. |
-| 0:19-0:25 | Codex accounts and usage windows | See usage and switch between Codex accounts. |
-| 0:25-0:30.5 | Claude accounts and usage windows | Keep Claude accounts ready in the same panel. |
-| 0:30.5-0:35 | Turntrail end frame and Marketplace address | Install Turntrail. Free and open source. |
+| 0:00-0:06 | Turntrail Sessions and VS Code Agent panel | Continue across agents without an AI-generated summary. |
+| 0:03-0:08 | Choose Claude, existing session, and clipboard delivery | Select the exact Codex conversation and target. |
+| 0:08-0:19 | Create and inspect the local handoff | Imported transcript, workspace snapshot, deterministic record. |
+| 0:19-0:30 | Open Accounts and scroll from Codex to Claude | Usage limits and banked resets in the editor. |
+| 0:30-0:36 | Accounts remain live behind the call to action | Install from the VS Code Marketplace. |
 
-Clean cuts keep every interface state readable and produce an exact 35-second final render.
+## Privacy
 
-## Source and Privacy
+The isolated `Launchpad` fixture contains only synthetic `.demo` accounts, transcripts, quotas, and
+the synthetic `C:\Demo\launchpad` workspace path. The capture uses a dedicated VS Code user-data
+directory and extension directory under ignored `.marketing-capture/`.
 
-The renderer uses the four captures in `packages/vscode/media/marketplace/`. Those images are
-generated from the isolated `Launchpad` fixture and contain only synthetic `.demo` accounts,
-synthetic transcripts, and the synthetic `C:\Demo\launchpad` path.
+Never record from a normal editor profile. Verify every output frame for names, email addresses,
+filesystem paths, tokens, notifications, and unrelated windows before publishing.
 
-Do not replace these inputs with captures from a normal editor profile.
+## Tooling
+
+- Packaged Turntrail VSIX in an isolated, maximized VS Code instance.
+- Chrome DevTools Protocol for live UI actions and 1920 by 1080 frame capture.
+- `edge-tts` for the US-English neural narration.
+- The Windows system pointer rendered to a transparent PNG.
+- FFmpeg and ffprobe for cursor animation, captions, audio mixing, encoding, and validation.
+
+## Reproduce
+
+Create the ignored narration environment once:
+
+```powershell
+python -m venv .marketing-tools\venv
+.marketing-tools\venv\Scripts\pip.exe install edge-tts==7.2.8
+```
+
+Generate the fixture, install the current VSIX into an isolated profile, and launch VS Code with the
+absolute fixture path, `--start-maximized`, and remote-debugging port `9333`. Then run:
+
+```powershell
+npm run marketing:video
+```
+
+For iteration, the stages can be run separately:
+
+```powershell
+npm run marketing:video:capture
+npm run marketing:video:narrate
+npm run marketing:video:render
+```
+
+The renderer refuses to complete unless the result is 1920 by 1080 H.264 at 30 fps with yuv420p
+video, 48 kHz stereo AAC audio, and the expected 36-second duration.
 
 ## Deliverables
 
 ```text
 marketing/video/short-demo/
-  turntrail-short-demo-v001-review-16x9.mp4
-  turntrail-short-demo-v001-en.srt
+  turntrail-short-demo-v002-review-live-16x9.mp4
+  turntrail-short-demo-v002-en.srt
   manifest.json
 ```
 
-The review render is 1920 by 1080, H.264, yuv420p, constant 30 fps, with a silent AAC track and
-fast-start metadata. It is deliberately stored outside `packages/vscode/media/`, so it is not
-included in the VSIX.
-
-## Reproduce
-
-Install FFmpeg 7 or newer and run:
-
-```bash
-npm run marketing:video
-```
-
-The renderer probes the finished file and refuses to complete when the codec, dimensions, frame
-rate, pixel format, audio stream, or duration is outside the expected delivery specification.
-
-## Approval Checklist
-
-- Inspect the opening, each workflow state, and the end frame at full size.
-- Confirm captions describe only visible, released features.
-- Confirm no real name, email, filesystem path, token, notification, or unrelated window appears.
-- Confirm the Marketplace address is readable before publishing.
-- Record founder approval before deriving square or vertical variants.
+These review assets are outside `packages/vscode/media/`, so they are not included in the VSIX.

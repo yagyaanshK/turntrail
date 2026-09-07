@@ -2,87 +2,67 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
+import { narration } from './generate-demo-narration.mjs';
 
 const root = process.cwd();
-const mediaRoot = path.join(root, 'packages', 'vscode', 'media');
-const screenshotRoot = path.join(mediaRoot, 'marketplace');
+const captureDir = path.join(root, '.marketing-capture', 'live-demo');
 const outputDir = path.join(root, 'marketing', 'video', 'short-demo');
-const outputName = 'turntrail-short-demo-v001-review-16x9.mp4';
-const captionName = 'turntrail-short-demo-v001-en.srt';
+const rawVideo = path.join(captureDir, 'turntrail-live-ui.mkv');
+const timelinePath = path.join(captureDir, 'timeline.json');
+const cursor = path.join(captureDir, 'cursor.png');
+const icon = path.join(root, 'packages', 'vscode', 'media', 'icon.png');
+const outputName = 'turntrail-short-demo-v002-review-live-16x9.mp4';
+const captionName = 'turntrail-short-demo-v002-en.srt';
 const output = path.join(outputDir, outputName);
 const captions = path.join(outputDir, captionName);
 const manifestPath = path.join(outputDir, 'manifest.json');
 const packageJson = JSON.parse(await fs.readFile(path.join(root, 'packages', 'vscode', 'package.json'), 'utf8'));
+const timeline = JSON.parse(await fs.readFile(timelinePath, 'utf8'));
 
 const width = 1920;
 const height = 1080;
 const fps = 30;
-const scenes = [
-  {
-    image: '01-cross-agent-handoff.png',
-    duration: 4,
-    kind: 'intro',
-    title: 'Turntrail',
-    subtitle: 'Continue one coding session across AI agents'
-  },
-  {
-    image: '01-cross-agent-handoff.png',
-    duration: 7.5,
-    caption: 'Find the exact Codex session you want to continue.'
-  },
-  {
-    image: '04-local-handoff.png',
-    duration: 7.5,
-    caption: 'Create a deterministic handoff for Claude. No AI summary.'
-  },
-  {
-    image: '02-account-quotas.png',
-    duration: 6,
-    caption: 'See usage and switch between Codex accounts.'
-  },
-  {
-    image: '03-claude-accounts.png',
-    duration: 5.5,
-    caption: 'Keep Claude accounts ready in the same panel.'
-  },
-  {
-    image: '04-local-handoff.png',
-    duration: 4.5,
-    kind: 'outro',
-    title: 'Install Turntrail',
-    subtitle: 'Free and open source',
-    url: 'marketplace.visualstudio.com/items?itemName=turntrail.turntrail'
-  }
+const duration = timeline.durationSeconds;
+const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
+const ffprobe = process.env.FFPROBE_PATH || 'ffprobe';
+const audioFiles = narration.map((clip) => path.join(captureDir, 'audio', `${clip.id}.mp3`));
+const captionsForVideo = [
+  [0.35, 6.4, 'Continue one coding session across agents.'],
+  [6.55, 11.6, 'Choose a Codex chat. Hand it off to Claude.'],
+  [11.9, 18.85, 'Transcript plus workspace snapshot. No AI summary.'],
+  [19, 25.75, 'See Codex and Claude usage in one place.'],
+  [30.4, 35.25, 'Install Turntrail free from the VS Code Marketplace.']
 ];
 
 await fs.mkdir(outputDir, { recursive: true });
-for (const scene of scenes) await fs.access(path.join(screenshotRoot, scene.image));
-await fs.access(path.join(mediaRoot, 'icon.png'));
+for (const input of [rawVideo, timelinePath, icon, ...audioFiles]) await fs.access(input);
+execFileSync('powershell.exe', [
+  '-NoProfile',
+  '-ExecutionPolicy', 'Bypass',
+  '-File', path.join(root, 'scripts', 'create-demo-cursor.ps1'),
+  '-OutputPath', cursor
+], { cwd: root, stdio: 'inherit' });
 await fs.writeFile(captions, buildSrt(), 'utf8');
 
-const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
-const ffprobe = process.env.FFPROBE_PATH || 'ffprobe';
-const args = ['-y'];
-for (const scene of scenes) {
-  args.push('-loop', '1', '-framerate', String(fps), '-t', String(scene.duration), '-i', path.join(screenshotRoot, scene.image));
-}
-args.push('-loop', '1', '-framerate', String(fps), '-t', String(totalDuration()), '-i', path.join(mediaRoot, 'icon.png'));
-args.push('-f', 'lavfi', '-t', String(totalDuration()), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+const args = ['-y', '-i', rawVideo];
+args.push('-loop', '1', '-framerate', String(fps), '-t', String(duration), '-i', cursor);
+args.push('-loop', '1', '-framerate', String(fps), '-t', String(duration), '-i', icon);
+for (const audioFile of audioFiles) args.push('-i', audioFile);
 args.push(
   '-filter_complex', buildFilter(),
   '-map', '[video]',
-  '-map', `${scenes.length + 1}:a:0`,
+  '-map', '[audio]',
   '-c:v', 'libx264',
   '-preset', 'medium',
-  '-crf', '20',
+  '-crf', '19',
   '-pix_fmt', 'yuv420p',
   '-r', String(fps),
   '-c:a', 'aac',
-  '-b:a', '128k',
+  '-b:a', '160k',
   '-ar', '48000',
+  '-ac', '2',
   '-movflags', '+faststart',
-  '-shortest',
-  '-t', String(totalDuration()),
+  '-t', String(duration),
   output
 );
 
@@ -109,12 +89,15 @@ await fs.writeFile(manifestPath, `${JSON.stringify({
   product: 'Turntrail',
   asset: 'short-demo',
   status: 'review',
-  version: 1,
+  version: 2,
   extensionVersion: packageJson.version,
   sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
   createdAt: new Date().toISOString(),
   syntheticData: true,
-  narration: false,
+  liveInterfaceCapture: true,
+  narration: { voice: 'en-US-GuyNeural', accent: 'American English', generatedWith: 'edge-tts' },
+  cursor: { source: 'Windows system pointer', normalPixels: 38, clickPixels: 58 },
+  editor: { maximized: true, zoom: 'reset', auxiliaryAgentPanelVisible: true },
   delivery: { width, height, fps, videoCodec: 'h264', audioCodec: 'aac', pixelFormat: 'yuv420p' },
   durationSeconds: Number(probe.format.duration),
   files
@@ -125,85 +108,108 @@ console.log(`Duration: ${Number(probe.format.duration).toFixed(2)}s`);
 
 function buildFilter() {
   const filters = [];
-  const logoInput = scenes.length;
-  filters.push(`[${logoInput}:v]scale=150:150,format=rgba,split=2[logo-intro][logo-outro]`);
+  const x = cursorExpression('x');
+  const y = cursorExpression('y');
+  const clickWindows = timeline.clicks.map((at) => `between(t,${fixed(at - 0.14)},${fixed(at + 0.14)})`).join('+');
 
-  scenes.forEach((scene, index) => {
-    const zoomDirection = 'min(pzoom+0.00018,1.025)';
+  filters.push('[0:v]fps=30,setpts=PTS-STARTPTS,format=yuv420p[base]');
+  filters.push(`[base]${demoLabel()}[labeled]`);
+
+  let current = 'labeled';
+  captionsForVideo.forEach(([start, end, value], index) => {
+    const next = `caption-${index}`;
     filters.push(
-      `[${index}:v]scale=${width}:${height},setsar=1,` +
-      `zoompan=z='${zoomDirection}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${width}x${height}:fps=${fps},` +
-      `trim=duration=${scene.duration},setpts=PTS-STARTPTS[scene-${index}-base]`
+      `[${current}]drawbox=x=790:y=930:w=680:h=78:color=0x111318@0.88:t=fill:` +
+      `enable='between(t,${start},${end})',` +
+      `${drawText(value, '(w-text_w)/2', 953, 29, 'white', false, `between(t,${start},${end})`)}[${next}]`
     );
-
-    if (scene.kind === 'intro') {
-      filters.push(
-        `[scene-${index}-base]boxblur=12:2,drawbox=x=0:y=0:w=iw:h=ih:color=0x111318@0.78:t=fill[intro-bg]`,
-        `[intro-bg][logo-intro]overlay=x=150:y=(H-h)/2:shortest=1,` +
-        `${text(scene.title, 350, '(h-text_h)/2-58', 72, 'white', true)},` +
-        `${text(scene.subtitle, 350, '(h-text_h)/2+32', 38, '0xD7D9E0')},` +
-        `${label('SYNTHETIC DEMONSTRATION DATA')},${normalize(scene.duration)}[scene-${index}]`
-      );
-    } else if (scene.kind === 'outro') {
-      filters.push(
-        `[scene-${index}-base]boxblur=12:2,drawbox=x=0:y=0:w=iw:h=ih:color=0x111318@0.82:t=fill[outro-bg]`,
-        `[outro-bg][logo-outro]overlay=x=(W-w)/2:y=230:shortest=1,` +
-        `${text(scene.title, '(w-text_w)/2', 430, 64, 'white', true)},` +
-        `${text(scene.subtitle, '(w-text_w)/2', 520, 34, '0xD7D9E0')},` +
-        `${text(scene.url, '(w-text_w)/2', 615, 28, '0xB8A9FF')},` +
-        `${label('SYNTHETIC DEMONSTRATION DATA')},${normalize(scene.duration)}[scene-${index}]`
-      );
-    } else {
-      filters.push(
-        `[scene-${index}-base]` +
-        `drawbox=x=110:y=ih-175:w=iw-220:h=104:color=0x111318@0.88:t=fill,` +
-        `drawbox=x=110:y=ih-175:w=8:h=104:color=0x7257E8@1:t=fill,` +
-        `${text(scene.caption, 150, 'h-142', 35, 'white')},` +
-        `${label('SYNTHETIC DEMONSTRATION DATA')},${normalize(scene.duration)}[scene-${index}]`
-      );
-    }
+    current = next;
   });
 
-  filters.push(`${scenes.map((_, index) => `[scene-${index}]`).join('')}concat=n=${scenes.length}:v=1:a=0[video]`);
+  filters.push(
+    `[${current}]drawbox=x=818:y=772:w=640:h=150:color=0x111318@0.91:t=fill:enable='between(t,29.7,36)',` +
+    `${drawText('Install Turntrail', 970, 804, 42, 'white', true, 'between(t,29.7,36)')},` +
+    `${drawText('Free and open source', 970, 857, 25, '0xD7D9E0', false, 'between(t,29.7,36)')}[cta-box]`
+  );
+  filters.push('[2:v]scale=104:104,format=rgba[icon]');
+  filters.push("[cta-box][icon]overlay=x=842:y=795:enable='between(t,29.7,36)':shortest=1[cta]");
+
+  filters.push('[1:v]format=rgba,split=2[cursor-source-normal][cursor-source-click]');
+  filters.push('[cursor-source-normal]scale=38:38[cursor-normal]');
+  filters.push('[cursor-source-click]scale=58:58[cursor-click]');
+  filters.push(
+    `[cta][cursor-normal]overlay=x='${x}-2':y='${y}-2':eval=frame:` +
+    `enable='not(${clickWindows})':shortest=1[normal-cursor]`
+  );
+  filters.push(
+    `[normal-cursor][cursor-click]overlay=x='${x}-3':y='${y}-3':eval=frame:` +
+    `enable='${clickWindows}':shortest=1,format=yuv420p[video]`
+  );
+
+  narration.forEach((clip, index) => {
+    const input = index + 3;
+    const delay = Math.round(clip.start * 1000);
+    filters.push(`[${input}:a]aresample=48000,aformat=channel_layouts=stereo,adelay=${delay}|${delay}[voice-${index}]`);
+  });
+  filters.push(
+    `aevalsrc='0.10*sin(2*PI*920*t)*exp(-55*t)':s=48000:d=0.12,` +
+    `aformat=channel_layouts=stereo,asplit=${timeline.clicks.length}` +
+    timeline.clicks.map((_, index) => `[click-source-${index}]`).join('')
+  );
+  timeline.clicks.forEach((at, index) => {
+    const delay = Math.round(at * 1000);
+    filters.push(`[click-source-${index}]adelay=${delay}|${delay}[click-${index}]`);
+  });
+  const audioInputs = [
+    ...narration.map((_, index) => `[voice-${index}]`),
+    ...timeline.clicks.map((_, index) => `[click-${index}]`)
+  ].join('');
+  filters.push(
+    `${audioInputs}amix=inputs=${narration.length + timeline.clicks.length}:duration=longest:normalize=0,` +
+    'alimiter=limit=0.95,loudnorm=I=-16:TP=-1.5:LRA=11[audio]'
+  );
+
   return filters.join(';');
 }
 
-function text(value, x, y, size, color, bold = false) {
+function cursorExpression(axis) {
+  const points = timeline.cursorKeyframes;
+  let expression = fixed(points.at(-1)[axis]);
+  for (let index = points.length - 2; index >= 0; index--) {
+    const start = points[index];
+    const end = points[index + 1];
+    const durationSeconds = end.at - start.at;
+    const progress = `(t-${fixed(start.at)})/${fixed(durationSeconds)}`;
+    const eased = `(3*pow(${progress},2)-2*pow(${progress},3))`;
+    const value = `${fixed(start[axis])}+(${fixed(end[axis] - start[axis])})*${eased}`;
+    expression = `if(lt(t,${fixed(start.at)}),${fixed(start[axis])},if(lt(t,${fixed(end.at)}),${value},${expression}))`;
+  }
+  return expression;
+}
+
+function demoLabel() {
+  return `drawbox=x=1648:y=92:w=232:h=38:color=0x111318@0.78:t=fill,` +
+    drawText('SYNTHETIC DEMO DATA', 1665, 103, 16, '0xD7D9E0');
+}
+
+function drawText(value, x, y, size, color, bold = false, enable) {
   const font = bold ? 'C\\:/Windows/Fonts/arialbd.ttf' : 'C\\:/Windows/Fonts/arial.ttf';
-  return `drawtext=fontfile='${font}':text='${escapeText(value)}':x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}`;
-}
-
-function label(value) {
-  return `drawbox=x=iw-430:y=34:w=390:h=42:color=0x111318@0.84:t=fill,` +
-    `${text(value, 'w-410', 45, 18, '0xD7D9E0')}`;
-}
-
-function normalize(duration) {
-  return `trim=duration=${duration},fps=${fps},format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS`;
+  const enabled = enable ? `:enable='${enable}'` : '';
+  return `drawtext=fontfile='${font}':text='${escapeText(value)}':x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}${enabled}`;
 }
 
 function escapeText(value) {
-  return String(value)
-    .replaceAll('\\', '\\\\')
-    .replaceAll(':', '\\:')
-    .replaceAll("'", "\\'")
-    .replaceAll('%', '\\%');
+  return String(value).replaceAll('\\', '\\\\').replaceAll(':', '\\:').replaceAll("'", "\\'").replaceAll('%', '\\%');
 }
 
-function totalDuration() {
-  return scenes.reduce((sum, scene) => sum + scene.duration, 0);
+function fixed(value) {
+  return Number(value).toFixed(3).replace(/\.000$/, '');
 }
 
 function buildSrt() {
-  const entries = [
-    [0.3, 4.0, 'Turntrail\nContinue one coding session across AI agents.'],
-    [4.2, 11.5, scenes[1].caption],
-    [11.7, 18.8, scenes[2].caption],
-    [19.2, 24.8, scenes[3].caption],
-    [25.2, 30.3, scenes[4].caption],
-    [30.7, 35.0, 'Install Turntrail. Free and open source.']
-  ];
-  return `${entries.map(([start, end, value], index) => `${index + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${value}\n`).join('\n')}\n`;
+  return `${captionsForVideo.map(([start, end, value], index) => (
+    `${index + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${value}\n`
+  )).join('\n')}\n`;
 }
 
 function srtTime(seconds) {
@@ -222,7 +228,7 @@ function pad(value) {
 function verifyProbe(probe) {
   const video = probe.streams.find((stream) => stream.codec_type === 'video');
   const audio = probe.streams.find((stream) => stream.codec_type === 'audio');
-  const duration = Number(probe.format.duration);
+  const actualDuration = Number(probe.format.duration);
   const problems = [];
   if (video?.codec_name !== 'h264') problems.push(`video codec is ${video?.codec_name || 'missing'}`);
   if (video?.width !== width || video?.height !== height) problems.push(`dimensions are ${video?.width}x${video?.height}`);
@@ -230,7 +236,7 @@ function verifyProbe(probe) {
   if (video?.r_frame_rate !== `${fps}/1`) problems.push(`frame rate is ${video?.r_frame_rate || 'missing'}`);
   if (audio?.codec_name !== 'aac') problems.push(`audio codec is ${audio?.codec_name || 'missing'}`);
   if (Number(audio?.sample_rate) !== 48000 || audio?.channels !== 2) problems.push('audio is not 48 kHz stereo');
-  if (duration < 34.8 || duration > 35.2) problems.push(`duration is ${duration}`);
+  if (actualDuration < duration - 0.05 || actualDuration > duration + 0.05) problems.push(`duration is ${actualDuration}`);
   if (problems.length > 0) throw new Error(`Video verification failed: ${problems.join('; ')}`);
 }
 

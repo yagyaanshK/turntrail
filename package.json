@@ -17,7 +17,10 @@
     "package:vscode": "node scripts/package-vscode.mjs",
     "marketing:fixture": "node scripts/create-marketing-fixture.mjs",
     "marketing:capture": "node scripts/capture-marketplace-screenshots.mjs",
-    "marketing:video": "node scripts/render-short-demo.mjs"
+    "marketing:video:capture": "node scripts/capture-live-demo.mjs",
+    "marketing:video:narrate": "node scripts/generate-demo-narration.mjs",
+    "marketing:video:render": "node scripts/render-short-demo.mjs",
+    "marketing:video": "npm run marketing:video:capture && npm run marketing:video:narrate && npm run marketing:video:render"
   },
   "engines": {
     "node": ">=20"
