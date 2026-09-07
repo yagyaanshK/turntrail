@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const vscode = require('vscode');
+const { classifyAccountHealth, recommendAccount } = require('./account-health.cjs');
 
 // Subscriptions, for both agents.
 //
@@ -123,7 +124,9 @@ class AccountsStore {
       );
 
       const rows = accounts.map((account) => this.row(account, provider, signedIn, resumesAt));
-      sections.push({ ...provider, rows, pooled: pool(rows) });
+      const recommended = recommendAccount(rows);
+      const presentedRows = rows.map((row) => ({ ...row, recommended: row.id === recommended?.id }));
+      sections.push({ ...provider, rows: presentedRows, pooled: pool(rows) });
     }
 
     return { sections, handoff: this.handoff };
@@ -136,7 +139,7 @@ class AccountsStore {
     const hasAuthenticationIssue = requiresSignIn || requiresRevalidation;
     const windows = hasAuthenticationIssue ? [] : (usage?.windows || []);
     const needsActivation = loginNeedsUpdate(account, this.activeIds[provider.id], hasAuthenticationIssue);
-    return {
+    const row = {
       id: account.id,
       provider: provider.id,
       label: account.label,
@@ -175,6 +178,16 @@ class AccountsStore {
         }))
       }))
     };
+    return { ...row, health: classifyAccountHealth(row) };
+  }
+
+  async recommendation(providerId, options = {}) {
+    if (!PROVIDERS.some((provider) => provider.id === providerId)) return undefined;
+    if (options.refresh) {
+      await this.reloadUsage({ force: true, providerId, signal: options.signal });
+    }
+    const model = await this.viewModel();
+    return model.sections.find((section) => section.id === providerId)?.rows.find((row) => row.recommended);
   }
 
   // The status bar shows one agent at a time. Codex wins when both are set,
@@ -437,6 +450,15 @@ function html(webview) {
   }
   .badge { color: var(--vscode-charts-green); font-weight: 600; }
   .badge.crit { color: var(--vscode-charts-red); }
+  .recommended {
+    color: var(--vscode-charts-green); font-size: 0.72em; font-weight: 600;
+    border: 1px solid color-mix(in srgb, var(--vscode-charts-green) 45%, transparent);
+    border-radius: 4px; padding: 1px 4px;
+  }
+  .health { font-weight: 600; }
+  .health.warn { color: var(--vscode-charts-yellow); }
+  .health.crit { color: var(--vscode-charts-red); }
+  .health.ok { color: var(--vscode-charts-green); }
   /* Always visible. Hiding actions until hover is what sent people to the
      command palette in the first place. */
   .actions { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
@@ -666,6 +688,7 @@ function renderRow(row) {
   const width = barWidth(row.remaining);
   const id = esc(row.id);
   const provider = esc(row.provider);
+  const health = row.health || { label: 'Quota unknown', tone: 'neutral' };
 
   let status;
   if (row.needsActivation) status = 'New sign-in ready';
@@ -705,6 +728,7 @@ function renderRow(row) {
       '<span class="ident">' +
         '<span class="name" data-name="' + id + '"><b>' + esc(row.label) + '</b>' +
           (row.plan ? '<span class="plan">' + esc(row.plan) + '</span>' : '') +
+          (row.recommended ? '<span class="recommended">Recommended</span>' : '') +
           '<button class="pencil" data-rename="' + id + '" title="Rename" aria-label="Rename account">✎</button>' +
         '</span>' +
         '<span class="rename" data-editor="' + id + '" data-provider="' + provider + '" hidden>' +
@@ -725,7 +749,8 @@ function renderRow(row) {
     meters +
     additionalLimits +
     resetCredits +
-    '<div class="meta"><span>' + status + esc(credits) + '</span>' +
+    '<div class="meta"><span><b class="health ' + esc(health.tone) + '">' + esc(health.label) + '</b>' +
+      (status && status !== health.label ? ' &middot; ' + status : '') + esc(credits) + '</span>' +
       (row.active ? '<span class="badge' + (state === 'crit' ? ' crit' : '') + '">' +
         (row.signedIn && !row.needsActivation ? 'In use' : 'Selected') + '</span>' : '') +
     '</div>' +
