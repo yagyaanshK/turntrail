@@ -5,8 +5,8 @@
   "status": "review",
   "version": 2,
   "extensionVersion": "0.17.6",
-  "sourceCommit": "66e149bcc2806c5c2ce4c41a57d7ba1f0ecd8747",
-  "createdAt": "2026-09-07T02:30:35.606Z",
+  "sourceCommit": "adc143f90f48acc37cba9644776a955f73eb5bb2",
+  "createdAt": "2026-09-07T02:45:46.834Z",
   "syntheticData": true,
   "liveInterfaceCapture": true,
   "narration": {
@@ -36,8 +36,8 @@
   "files": [
     {
       "file": "turntrail-short-demo-v002-review-live-16x9.mp4",
-      "bytes": 2095158,
-      "sha256": "12045f18341a20a5455d2af21c56508410636e9945e01aa33246923fe49e791a"
+      "bytes": 2098417,
+      "sha256": "597f37d8db70c33a5e2c4ddb63cc7d7e53b494701621f6fe4d74509d88690859"
     },
     {
       "file": "turntrail-short-demo-v002-en.srt",
