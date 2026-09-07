@@ -4,6 +4,8 @@
 
 Turntrail is a local, vendor-neutral handoff layer for developers who switch between agentic coding tools such as **Claude Code**, **Codex**, **Gemini CLI**, and **Cursor Agent**. It captures native transcript content and a workspace snapshot, then generates a clean handoff you paste into the next tool.
 
+[**Install Turntrail from the VS Code Marketplace**](https://marketplace.visualstudio.com/items?itemName=turntrail.turntrail)
+
 - 🔒 **Local handoffs** — transcripts and snapshots stay under `.turntrail/`; the handoff path has no telemetry or network calls.
 - 🧾 **Lossless** — native transcripts are imported verbatim as JSONL. No AI summary in the core flow.
 - ✂️ **Lean handoffs** — duplicate turns are collapsed, noisy tool output is trimmed, inline screenshots are stripped, and common credential formats are redacted before export.
@@ -42,6 +44,18 @@ Turntrail treats continuity as a **local project artifact**, not a feature of an
 
 ## Install
 
+**VS Code Marketplace (recommended):**
+
+[Open Turntrail in the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=turntrail.turntrail),
+then choose **Install**. You can also search for `Turntrail` in the Extensions view inside VS Code.
+
+**VSIX for compatible editors:**
+
+Download the VSIX from the
+[latest GitHub release](https://github.com/yagyaanshK/turntrail/releases/latest). In your editor,
+run **“Extensions: Install from VSIX…”** and select the downloaded file. This works in VS Code and
+compatible forks such as Cursor, Windsurf, and Google Antigravity.
+
 **From source (CLI + extension):**
 
 ```bash
@@ -57,18 +71,14 @@ Run the CLI:
 node packages/cli/bin/turntrail.js --help
 ```
 
-**VS Code extension:** download the VSIX from the
-[latest GitHub release](https://github.com/yagyaanshK/turntrail/releases/latest), or build it
-locally:
+To build the extension locally:
 
 ```bash
 npm run package:vscode
 ```
 
-Then in your editor run **“Extensions: Install from VSIX…”** and pick
-`dist/turntrail-<version>.vsix`. This works in VS Code and compatible forks (Cursor, Windsurf,
-Google Antigravity). Generated VSIX files are release artifacts and are not committed to the source
-tree.
+Install `dist/turntrail-<version>.vsix` using **“Extensions: Install from VSIX…”**. Generated VSIX
+files are release artifacts and are not committed to the source tree.
 
 ## Quick start (CLI)
 
