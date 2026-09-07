@@ -46,6 +46,9 @@ test('imports jsonl transcripts and exports deterministic handoff', async () => 
   const exported = await exportHandoff(root, { target: 'codex' });
   const handoff = await fs.readFile(exported.path, 'utf8');
   assert.match(handoff, /Turntrail Handoff: codex/);
+  assert.match(handoff, /Distinguish established facts, explicit user decisions, unresolved questions/);
+  assert.match(handoff, /Do not inherit the previous agent's confidence, session-specific permissions or approvals, or completion claims/);
+  assert.match(handoff, /ask the user only when a consequential ambiguity remains/);
   assert.match(handoff, /Please inspect auth/);
 });
 
@@ -269,8 +272,9 @@ test('export collapses duplicate turns and truncates tool output', async () => {
   // assistant message by design, which is a separate occurrence.
   const transcript = handoff.split('## Transcript Turns')[1];
   assert.equal(transcript.split('\non it\n').length - 1, 1);
-  // Truncated tool turn must be far smaller than the raw 5 KB.
-  assert.ok(handoff.length < 4000);
+  // The fixed safety header is not part of the transcript budget. Even with
+  // that header, the truncated handoff must remain smaller than the raw turn.
+  assert.ok(handoff.length < 5003);
 });
 
 test('export with dedupe disabled keeps duplicate turns', async () => {

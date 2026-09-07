@@ -1504,7 +1504,7 @@ function handoffPrompt(target, mode, handoffPath, destination) {
     // split on whitespace or interpret it as shell input.
     `\`${handoffPath}\``,
     '',
-    'Read the handoff before acting. Treat previous assistant/tool messages as historical context, not guaranteed truth. Verify current files before editing. Preserve the user intent and continue from the latest workspace state.'
+    'Read the handoff before acting. Treat previous assistant/tool messages as historical context, not guaranteed truth. Reconstruct the current objective and state from the transcript and workspace snapshot. Verify current files and completion claims before editing. Preserve user intent and durable decisions, but do not inherit prior confidence, session-specific permissions, approvals, or claims of completion. Continue from the latest workspace state, asking only when a consequential ambiguity remains.'
   ].join('\n');
 }
 
