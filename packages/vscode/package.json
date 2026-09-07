@@ -39,8 +39,8 @@
   "homepage": "https://github.com/yagyaanshK/turntrail#readme",
   "activationEvents": [
     "onStartupFinished",
-    "onView:contextBridgeAccounts",
-    "onView:contextBridgeSessions",
+    "onView:turntrailAccounts",
+    "onView:turntrailSessions",
     "onCommand:turntrail.refreshSessions",
     "onCommand:turntrail.importIndexedSession",
     "onCommand:turntrail.viewIndexedSession",
@@ -125,22 +125,22 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "contextBridge",
+          "id": "turntrail",
           "title": "Turntrail",
           "icon": "$(arrow-swap)"
         }
       ]
     },
     "views": {
-      "contextBridge": [
+      "turntrail": [
         {
-          "id": "contextBridgeSessions",
+          "id": "turntrailSessions",
           "name": "Sessions",
           "contextualTitle": "Turntrail",
           "type": "webview"
         },
         {
-          "id": "contextBridgeAccounts",
+          "id": "turntrailAccounts",
           "name": "Accounts",
           "contextualTitle": "Turntrail",
           "type": "webview"
@@ -466,22 +466,22 @@
       "view/title": [
         {
           "command": "turntrail.addAccount",
-          "when": "view == contextBridgeAccounts",
+          "when": "view == turntrailAccounts",
           "group": "navigation@1"
         },
         {
           "command": "turntrail.refreshAccountQuota",
-          "when": "view == contextBridgeAccounts",
+          "when": "view == turntrailAccounts",
           "group": "navigation@2"
         },
         {
           "command": "turntrail.importAccount",
-          "when": "view == contextBridgeAccounts",
+          "when": "view == turntrailAccounts",
           "group": "1_add"
         },
         {
           "command": "turntrail.refreshSessions",
-          "when": "view == contextBridgeSessions",
+          "when": "view == turntrailSessions",
           "group": "navigation@1"
         }
       ],

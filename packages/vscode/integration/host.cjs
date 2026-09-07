@@ -45,7 +45,7 @@ async function smokeAndSeed(hooks) {
   }
 
   await vscode.commands.executeCommand('workbench.view.extension.contextBridge');
-  await vscode.commands.executeCommand('contextBridgeAccounts.focus');
+  await vscode.commands.executeCommand('turntrailAccounts.focus');
   await waitFor(() => hooks.integrationState().webviewResolved);
   const state = hooks.integrationState();
   assert.equal(state.webviewScripts, true);
@@ -53,7 +53,7 @@ async function smokeAndSeed(hooks) {
   assert.match(state.webviewHtml, /<div id="root">/);
   assert.match(state.webviewHtml, /acquireVsCodeApi\(\)/);
 
-  await vscode.commands.executeCommand('contextBridgeSessions.focus');
+  await vscode.commands.executeCommand('turntrailSessions.focus');
   await waitFor(() => hooks.integrationState().sessionsWebviewResolved);
   const sessionsState = hooks.integrationState();
   assert.equal(sessionsState.sessionsWebviewScripts, true);
