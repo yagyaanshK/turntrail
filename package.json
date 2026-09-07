@@ -16,7 +16,8 @@
     "check:packages": "node scripts/check-packages.mjs",
     "package:vscode": "node scripts/package-vscode.mjs",
     "marketing:fixture": "node scripts/create-marketing-fixture.mjs",
-    "marketing:capture": "node scripts/capture-marketplace-screenshots.mjs"
+    "marketing:capture": "node scripts/capture-marketplace-screenshots.mjs",
+    "marketing:video": "node scripts/render-short-demo.mjs"
   },
   "engines": {
     "node": ">=20"
