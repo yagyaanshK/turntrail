@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "product": "Turntrail",
+  "asset": "short-demo",
+  "status": "review",
+  "version": 1,
+  "extensionVersion": "0.17.6",
+  "sourceCommit": "d27736c88333cbcc6cf7ff3a443219a4cf07de18",
+  "createdAt": "2026-09-07T01:25:12.220Z",
+  "syntheticData": true,
+  "narration": false,
+  "delivery": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "pixelFormat": "yuv420p"
+  },
+  "durationSeconds": 34.933333,
+  "files": [
+    {
+      "file": "turntrail-short-demo-v001-review-16x9.mp4",
+      "bytes": 5753029,
+      "sha256": "5540d73f186a8764032ecb912bd043b911fba0c50243530d6bd270b09b8c8b06"
+    },
+    {
+      "file": "turntrail-short-demo-v001-en.srt",
+      "bytes": 495,
+      "sha256": "c1926544e98d61703e6107989e0e43153908ce2f1b6fddeff673de239730fb4a"
+    }
+  ]
+}
