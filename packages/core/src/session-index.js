@@ -5,6 +5,7 @@ import { readManifest } from './store.js';
 
 export const NATIVE_SESSION_PROVIDERS = ['claude', 'codex', 'gemini', 'cursor'];
 export const DEFAULT_SESSION_INDEX_LIMIT = 100;
+export const MAX_ADDITIONAL_DISCOVERY_LOCATIONS = 50;
 
 export async function listSessionIndex(root, options = {}) {
   const providers = normalizeProviders(options.providers);
@@ -14,22 +15,46 @@ export async function listSessionIndex(root, options = {}) {
   await Promise.all(providers.map(async (provider) => {
     try {
       const discoveryOptions = options.discoveryOptions?.[provider] || {};
+      const { additionalLocations: requestedLocations, ...baseDiscoveryOptions } = discoveryOptions;
+      const additionalLocations = Array.isArray(requestedLocations)
+        ? requestedLocations.slice(0, MAX_ADDITIONAL_DISCOVERY_LOCATIONS)
+        : [];
+      if (Array.isArray(requestedLocations) && requestedLocations.length > additionalLocations.length) {
+        errors.push({
+          provider,
+          message: `Skipped ${requestedLocations.length - additionalLocations.length} extra account homes above the discovery limit.`
+        });
+      }
       let providerErrors = 0;
-      nativeByProvider[provider] = await discoverNativeSessions(provider, {
-        root,
-        all: Boolean(options.all),
-        includeArchived: true,
-        limit: options.perProviderLimit || DEFAULT_SESSION_INDEX_LIMIT,
-        signal: options.signal,
-        ...discoveryOptions,
-        onDiscoveryError(details) {
-          discoveryOptions.onDiscoveryError?.(details);
+      const discovered = [];
+      for (const location of [{}, ...additionalLocations]) {
+        try {
+          const rows = await discoverNativeSessions(provider, {
+            root,
+            all: Boolean(options.all),
+            includeArchived: true,
+            limit: options.perProviderLimit || DEFAULT_SESSION_INDEX_LIMIT,
+            signal: options.signal,
+            ...baseDiscoveryOptions,
+            ...location,
+            onDiscoveryError(details) {
+              discoveryOptions.onDiscoveryError?.(details);
+              if (providerErrors++ < 3) {
+                const message = details.error instanceof Error ? details.error.message : String(details.error);
+                errors.push({ provider, message: `Skipped one unreadable transcript: ${message}` });
+              }
+            }
+          });
+          discovered.push(...rows);
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
           if (providerErrors++ < 3) {
-            const message = details.error instanceof Error ? details.error.message : String(details.error);
-            errors.push({ provider, message: `Skipped one unreadable transcript: ${message}` });
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push({ provider, message: `Skipped one unreadable session store: ${message}` });
           }
         }
-      });
+      }
+      nativeByProvider[provider] = discovered;
     } catch (error) {
       if (options.signal?.aborted) throw error;
       nativeByProvider[provider] = [];

@@ -44,7 +44,7 @@ async function smokeAndSeed(hooks) {
     assert.equal(commands.includes(command), true, `${command} must be registered`);
   }
 
-  await vscode.commands.executeCommand('workbench.view.extension.contextBridge');
+  await vscode.commands.executeCommand('workbench.view.extension.turntrail');
   await vscode.commands.executeCommand('turntrailAccounts.focus');
   await waitFor(() => hooks.integrationState().webviewResolved);
   const state = hooks.integrationState();

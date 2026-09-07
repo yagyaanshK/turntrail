@@ -81,6 +81,16 @@ The **Managed CLI** strip above the session list shows Claude and Codex terminal
 Turntrail. Use its add button for a new session, **Open CLI** on a session row to resume that native
 conversation, and the play/close controls to focus or stop a managed terminal.
 
+Before opening a new managed session, when managed accounts exist, Turntrail refreshes that
+provider's account usage and selects the signed-in account with the strongest fresh remaining quota.
+An account with unknown quota is a fallback; stale readings never outrank fresh readings, and
+exhausted or rejected logins are excluded.
+The selected account is shown in the terminal title and remains pinned through its isolated
+`CODEX_HOME` or `CLAUDE_CONFIG_DIR`. Resumed native sessions keep their original environment because
+changing homes can make their existing transcript unavailable.
+The Sessions view scans those managed account homes as well as the default native stores, so their
+transcripts remain discoverable after the terminal closes.
+
 Inside **Handoff**, **Send to → Managed CLI** provides direct delivery:
 
 - **New** launches the official CLI with the handoff prompt as its initial prompt.

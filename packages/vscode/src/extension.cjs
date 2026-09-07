@@ -32,7 +32,7 @@ async function activateExtension(context) {
   accountsProvider = new AccountsStore(core);
   accountsWebview = new AccountsWebview(accountsProvider);
   managedTerminals = new ManagedTerminalStore();
-  sessionsProvider = new SessionsStore(core, workspaceRoot);
+  sessionsProvider = new SessionsStore(core, workspaceRoot, { discoveryOptions: accountSessionDiscoveryOptions });
   sessionsWebview = new SessionsWebview(sessionsProvider);
   loginPanel = new LoginPanel(context, core, accountsProvider);
 
@@ -118,6 +118,28 @@ async function activateExtension(context) {
 }
 
 function deactivate() {}
+
+async function accountSessionDiscoveryOptions() {
+  const api = await core();
+  const accounts = await api.listAccounts();
+  return {
+    codex: {
+      additionalLocations: accounts.filter((account) => account.provider === 'codex').map((account) => {
+        const home = api.codexHome(account.id);
+        return {
+          sessionsDir: path.join(home, 'sessions'),
+          archivedDir: path.join(home, 'archived_sessions'),
+          sessionIndex: path.join(home, 'session_index.jsonl')
+        };
+      })
+    },
+    claude: {
+      additionalLocations: accounts.filter((account) => account.provider === 'claude').map((account) => ({
+        projectsDir: path.join(api.claudeHome(account.id), 'projects')
+      }))
+    }
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Codex subscriptions
@@ -1178,12 +1200,40 @@ async function openManagedSession(item = {}) {
     vscode.window.setStatusBarMessage(`Turntrail: focused the existing managed ${agentName(provider)} session.`, 3000);
     return existing;
   }
+  const account = row?.sessionId ? undefined : await recommendedManagedAccount(provider);
   return managedTerminals.launch({
     provider,
     root,
     sessionId: row?.sessionId,
-    title: row?.title || 'New session'
+    title: row?.title || 'New session',
+    ...account
   });
+}
+
+async function recommendedManagedAccount(provider) {
+  const registered = await accountsProvider.accounts(provider);
+  if (registered.length === 0) return undefined;
+
+  const recommendation = await withProgress(
+    `Selecting a ${agentName(provider)} account`,
+    ({ signal }) => accountsProvider.recommendation(provider, { refresh: true, signal })
+  );
+  if (!recommendation) {
+    throw new Error(
+      `No usable ${agentName(provider)} account is available. Refresh its usage or repair its sign-in in the Accounts view.`
+    );
+  }
+
+  const account = registered.find((candidate) => candidate.id === recommendation.id);
+  if (!account) throw new Error('The recommended account is no longer registered. Refresh the Accounts view and retry.');
+  const api = await core();
+  if (provider === 'claude') await api.ensureClaudeHome(account.id);
+  else await api.ensureCodexHome(account.id);
+  return {
+    accountId: account.id,
+    accountLabel: account.label,
+    accountEnv: provider === 'claude' ? api.claudeEnv(account.id) : api.codexEnv(account.id)
+  };
 }
 
 function focusManagedSession(item = {}) {
@@ -1345,7 +1395,16 @@ async function deliverManagedHandoff({ target, mode, prompt, destination, root }
     title = resolved.session.title || resolved.session.latest || title;
   }
 
-  const record = await managedTerminals.launch({ target, provider: target, root, sessionId, title, prompt });
+  const account = sessionId ? undefined : await recommendedManagedAccount(target);
+  const record = await managedTerminals.launch({
+    target,
+    provider: target,
+    root,
+    sessionId,
+    title,
+    prompt,
+    ...account
+  });
   return { record, reused: false };
 }
 

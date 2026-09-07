@@ -9,9 +9,10 @@ const PROVIDERS = [
 ];
 
 class SessionsStore {
-  constructor(core, root) {
+  constructor(core, root, options = {}) {
     this.core = core;
     this.root = root;
+    this.discoveryOptions = options.discoveryOptions;
     this.rows = new Map();
     this.all = false;
     this.loading = false;
@@ -29,8 +30,16 @@ class SessionsStore {
     this.loading = true;
     this.fire();
     try {
-      const [{ listSessionIndex }, root] = await Promise.all([this.core(), this.root()]);
-      const result = await listSessionIndex(root, { all: this.all, signal: options.signal });
+      const [{ listSessionIndex }, root, discoveryOptions] = await Promise.all([
+        this.core(),
+        this.root(),
+        typeof this.discoveryOptions === 'function' ? this.discoveryOptions() : this.discoveryOptions
+      ]);
+      const result = await listSessionIndex(root, {
+        all: this.all,
+        signal: options.signal,
+        discoveryOptions: discoveryOptions || {}
+      });
       if (generation !== this.generation) return this.viewModel();
       this.rows = new Map(result.sessions.map((row) => [row.id, row]));
       this.errors = result.errors || [];
@@ -165,6 +174,7 @@ function publicManagedRow(row) {
     provider: String(row?.provider || ''),
     sessionId: row?.sessionId ? String(row.sessionId) : undefined,
     title: String(row?.title || 'Managed session'),
+    accountLabel: row?.accountLabel ? String(row.accountLabel) : undefined,
     createdAt: row?.createdAt ? String(row.createdAt) : undefined
   };
 }
@@ -345,7 +355,8 @@ function managedSessions() {
   const rows = model.managed || [];
   const list = rows.length ? '<div class="managed-list">' + rows.map(function (row) {
     return '<div class="managed-row"><span class="provider">' + esc(label(row.provider)) + '</span>' +
-      '<span class="managed-title" title="' + esc(row.title) + '">' + esc(row.title) + '</span>' +
+      '<span class="managed-title" title="' + esc(row.title + (row.accountLabel ? ' · ' + row.accountLabel : '')) + '">' +
+        esc(row.title) + (row.accountLabel ? ' · ' + esc(row.accountLabel) : '') + '</span>' +
       '<button class="icon-command" data-act="focus-managed" data-managed-id="' + esc(row.id) + '" title="Focus managed terminal" aria-label="Focus managed terminal">&#x25B6;</button>' +
       '<button class="icon-command" data-act="close-managed" data-managed-id="' + esc(row.id) + '" title="Close managed terminal" aria-label="Close managed terminal">&#x2715;</button></div>';
   }).join('') + '</div>' : '<div class="managed-empty">No managed CLI sessions in this workspace.</div>';

@@ -33,6 +33,7 @@ class ManagedTerminalStore {
   async launch(input) {
     const provider = validateProvider(input?.provider);
     const root = validateRoot(input?.root);
+    const account = managedAccount(provider, input);
     const sessionId = optionalIdentifier(input?.sessionId, 512, 'session id');
     const prompt = optionalText(input?.prompt, MAX_PROMPT_CHARS, 'handoff prompt');
     const title = displayText(input?.title, 160) || (sessionId ? `Session ${sessionId.slice(0, 8)}` : 'New session');
@@ -40,22 +41,36 @@ class ManagedTerminalStore {
     const launch = await this.resolveLaunch(provider, args, { platform: this.platform });
     const id = crypto.randomUUID();
     const env = {
+      ...account.env,
       [MARKER]: '1',
       TURNTRAIL_MANAGED_ID: id,
       TURNTRAIL_MANAGED_PROVIDER: provider,
       TURNTRAIL_MANAGED_ROOT: root,
       TURNTRAIL_MANAGED_SESSION_ID: sessionId || '',
-      TURNTRAIL_MANAGED_TITLE: title
+      TURNTRAIL_MANAGED_TITLE: title,
+      TURNTRAIL_MANAGED_ACCOUNT_ID: account.id || '',
+      TURNTRAIL_MANAGED_ACCOUNT_LABEL: account.label || ''
     };
     const terminal = this.window.createTerminal({
-      name: `Turntrail · ${provider === 'claude' ? 'Claude' : 'Codex'} · ${title}`,
+      name: `Turntrail · ${provider === 'claude' ? 'Claude' : 'Codex'} · ${title}` +
+        (account.label ? ` · ${account.label}` : ''),
       cwd: root,
       shellPath: launch.command,
       shellArgs: launch.args,
       env,
       isTransient: false
     });
-    const record = { id, provider, root, sessionId, title, terminal, createdAt: new Date().toISOString() };
+    const record = {
+      id,
+      provider,
+      root,
+      sessionId,
+      title,
+      accountId: account.id,
+      accountLabel: account.label,
+      terminal,
+      createdAt: new Date().toISOString()
+    };
     this.records.set(id, record);
     terminal.show(false);
     this.fire();
@@ -87,6 +102,8 @@ class ManagedTerminalStore {
       root,
       sessionId,
       title: displayText(env.TURNTRAIL_MANAGED_TITLE, 160) || 'Managed session',
+      accountId: safeAccountId(env.TURNTRAIL_MANAGED_ACCOUNT_ID),
+      accountLabel: displayText(env.TURNTRAIL_MANAGED_ACCOUNT_LABEL, 160),
       terminal,
       createdAt: new Date().toISOString()
     };
@@ -121,6 +138,8 @@ class ManagedTerminalStore {
       provider: record.provider,
       sessionId: record.sessionId,
       title: record.title,
+      accountId: record.accountId,
+      accountLabel: record.accountLabel,
       createdAt: record.createdAt
     }));
   }
@@ -255,6 +274,29 @@ function validateProvider(value) {
   return provider;
 }
 
+function managedAccount(provider, input = {}) {
+  const id = input.accountId === undefined || input.accountId === ''
+    ? undefined
+    : safeAccountId(input.accountId);
+  if (input.accountId && !id) throw new Error('Invalid managed account id.');
+
+  const label = displayText(input.accountLabel, 160);
+  const supplied = input.accountEnv;
+  if (!id && supplied === undefined) return { id: undefined, label: undefined, env: {} };
+  if (!id || !supplied || typeof supplied !== 'object' || Array.isArray(supplied)) {
+    throw new Error('A managed account id and provider home must be supplied together.');
+  }
+
+  const key = provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
+  const keys = Object.keys(supplied);
+  if (keys.length !== 1 || keys[0] !== key) {
+    throw new Error(`Managed ${provider} accounts may set only ${key}.`);
+  }
+  const home = safeRoot(supplied[key]);
+  if (!home) throw new Error(`Managed ${provider} account home must be an absolute path.`);
+  return { id, label: label || id, env: { [key]: home } };
+}
+
 function safeProvider(value) {
   const provider = String(value || '').toLowerCase();
   return PROVIDERS.has(provider) ? provider : undefined;
@@ -273,6 +315,12 @@ function safeRoot(value) {
 
 function safeId(value) {
   return typeof value === 'string' && /^[a-f0-9-]{36}$/i.test(value) ? value : undefined;
+}
+
+function safeAccountId(value) {
+  const text = String(value || '');
+  if (text === '.' || text === '..') return undefined;
+  return /^[a-z0-9][a-z0-9._-]{0,127}$/i.test(text) ? text : undefined;
 }
 
 function optionalText(value, maxLength, label) {
@@ -305,6 +353,7 @@ function normalizedPath(value, platform = process.platform) {
 module.exports = {
   MARKER,
   ManagedTerminalStore,
+  managedAccount,
   matchesProviderLaunch,
   managedTerminalArgs,
   resolveProviderLaunch

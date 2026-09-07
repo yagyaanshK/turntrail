@@ -47,6 +47,32 @@ test('sessions store keeps native paths out of the webview model and resolves op
   assert.equal(store.resolve(source.id).ledgerSessionId, 'ledger-one');
 });
 
+test('sessions store passes managed account locations and exposes only the account label', async () => {
+  let receivedOptions;
+  const store = new SessionsStore(
+    async () => ({
+      listSessionIndex: async (_root, options) => {
+        receivedOptions = options;
+        return { sessions: [], errors: [] };
+      }
+    }),
+    async () => 'C:\\repo',
+    { discoveryOptions: async () => ({ codex: { additionalLocations: [{ sessionsDir: 'managed' }] } }) }
+  );
+  store.setManaged([{
+    id: 'managed-1',
+    provider: 'codex',
+    title: 'Feature',
+    accountId: 'private-account-id',
+    accountLabel: 'Primary'
+  }]);
+  await store.refresh();
+
+  assert.equal(receivedOptions.discoveryOptions.codex.additionalLocations[0].sessionsDir, 'managed');
+  assert.equal(store.viewModel().managed[0].accountLabel, 'Primary');
+  assert.equal(store.viewModel().managed[0].accountId, undefined);
+});
+
 test('sessions webview has CSP, filters, and maps row actions to opaque commands', async () => {
   const store = new SessionsStore(async () => ({ listSessionIndex: async () => ({ sessions: [], errors: [] }) }), async () => 'C:\\repo');
   let receiver;

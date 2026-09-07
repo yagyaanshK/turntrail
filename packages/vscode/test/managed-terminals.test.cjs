@@ -28,6 +28,7 @@ Module._load = function load(request, parent, isMain) {
 const {
   MARKER,
   ManagedTerminalStore,
+  managedAccount,
   matchesProviderLaunch,
   managedTerminalArgs,
   resolveProviderLaunch
@@ -94,14 +95,25 @@ test('managed terminals launch direct agent processes and inject only while live
 
   const prompt = 'Continue from C:\\repo';
   const record = await store.launch({
-    provider: 'claude', root: fixtureRoot, sessionId: 'session-1', title: 'Feature', prompt
+    provider: 'claude',
+    root: fixtureRoot,
+    sessionId: 'session-1',
+    title: 'Feature',
+    prompt,
+    accountId: 'claude-primary',
+    accountLabel: 'Primary',
+    accountEnv: { CLAUDE_CONFIG_DIR: path.join(fixtureRoot, 'claude-home') }
   });
   const terminal = window.created[0];
   assert.equal(terminal.creationOptions.shellPath, fixtureExecutable('claude'));
   assert.deepEqual(terminal.creationOptions.shellArgs, ['--resume', 'session-1', prompt]);
   assert.equal(terminal.creationOptions.env[MARKER], '1');
+  assert.equal(terminal.creationOptions.env.CLAUDE_CONFIG_DIR, path.join(fixtureRoot, 'claude-home'));
+  assert.equal(terminal.creationOptions.env.TURNTRAIL_MANAGED_ACCOUNT_ID, 'claude-primary');
+  assert.match(terminal.creationOptions.name, /Primary$/);
   assert.equal(terminal.shown, 1);
   assert.equal(store.viewModel(fixtureRoot)[0].id, record.id);
+  assert.equal(store.viewModel(fixtureRoot)[0].accountLabel, 'Primary');
 
   store.inject(record.id, 'second handoff');
   assert.deepEqual(terminal.sent, [['second handoff', true]]);
@@ -149,6 +161,15 @@ test('managed terminal input is bounded and provider-limited', async () => {
   assert.throws(() => managedTerminalArgs('cursor'), /only Claude and Codex/i);
   assert.throws(() => managedTerminalArgs('claude', { prompt: 'x'.repeat(16 * 1024 + 1) }), /too long/i);
   assert.throws(() => managedTerminalArgs('claude', { sessionId: 'id\n--dangerously-skip-permissions' }), /Invalid session id/i);
+  assert.throws(() => managedAccount('codex', {
+    accountId: '../escape', accountEnv: { CODEX_HOME: fixtureRoot }
+  }), /account id/i);
+  assert.throws(() => managedAccount('codex', {
+    accountId: 'primary', accountEnv: { CLAUDE_CONFIG_DIR: fixtureRoot }
+  }), /only CODEX_HOME/i);
+  assert.throws(() => managedAccount('claude', {
+    accountId: 'primary', accountEnv: { CLAUDE_CONFIG_DIR: 'relative-home' }
+  }), /absolute path/i);
 });
 
 test('restored terminals must still have the expected direct provider launch', () => {
