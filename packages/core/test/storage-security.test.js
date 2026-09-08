@@ -6,15 +6,18 @@ import test from 'node:test';
 import {
   accountDir,
   accountsRoot,
+  attachmentHash,
   createAccount,
   initStore,
   latestSnapshot,
   listAccounts,
   readManifest,
+  readAttachment,
   renderHandoff,
   resolveLedger,
   sanitizeContentForHandoff,
   writeExport,
+  writeAttachment,
   writeSession,
   writeSnapshot
 } from '../src/index.js';
@@ -184,6 +187,59 @@ test('same-millisecond exports never overwrite each other', async () => {
   assert.equal(new Set(written.map((entry) => entry.id)).size, 20);
   const contents = await Promise.all(written.map((entry) => fs.readFile(entry.path, 'utf8')));
   assert.equal(new Set(contents).size, 20);
+});
+
+test('attachments are content-addressed, deduplicated, bounded, and verified', async () => {
+  const root = await sandbox('turntrail-attachment-store-');
+  const content = 'sanitized full tool output';
+  const first = await writeAttachment(root, content);
+  const second = await writeAttachment(root, content);
+  assert.equal(first.hash, attachmentHash(content));
+  assert.equal(first.path, second.path);
+  assert.equal((await readAttachment(root, first.hash)).content, content);
+  await assert.rejects(() => readAttachment(root, '../outside'), /64-character SHA-256/);
+  await assert.rejects(() => readAttachment(root, first.hash, { maxBytes: 2 }), /2-byte safety limit/);
+
+  await fs.writeFile(first.path, 'corrupt', 'utf8');
+  await assert.rejects(() => readAttachment(root, first.hash), /failed SHA-256 verification/);
+});
+
+test('attachment storage cannot be redirected outside the ledger', async (context) => {
+  const root = await sandbox('turntrail-attachment-link-');
+  const outside = path.join(root, 'outside');
+  const attachments = path.join(root, '.turntrail', 'attachments');
+  await fs.mkdir(outside);
+  await fs.rm(attachments, { recursive: true });
+  try {
+    await fs.symlink(outside, attachments, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES') return context.skip('filesystem links are not permitted on this host');
+    throw error;
+  }
+
+  await assert.rejects(() => writeAttachment(root, 'must stay inside'), /escapes its allowed directory/);
+  assert.deepEqual(await fs.readdir(outside), []);
+});
+
+test('export pruning removes only attachments no retained export references', async () => {
+  const root = await sandbox('turntrail-attachment-prune-');
+  const oldAttachment = await writeAttachment(root, 'old');
+  const sharedAttachment = await writeAttachment(root, 'shared');
+  const newAttachment = await writeAttachment(root, 'new');
+
+  await writeExport(root, 'claude', 'old export', {
+    keep: 10,
+    attachments: [oldAttachment.hash, sharedAttachment.hash]
+  });
+  await writeExport(root, 'codex', 'new export', {
+    keep: 1,
+    attachments: [sharedAttachment.hash, newAttachment.hash]
+  });
+
+  await assert.rejects(() => fs.access(oldAttachment.path));
+  await fs.access(sharedAttachment.path);
+  await fs.access(newAttachment.path);
+  assert.equal((await readManifest(root)).exports.length, 1);
 });
 
 test('standalone sanitizer redacts credential assignments without damaging ordinary text', () => {

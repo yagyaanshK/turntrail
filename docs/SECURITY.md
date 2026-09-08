@@ -8,6 +8,12 @@ The `.turntrail/` ledger is a verbatim working record. Native transcripts, comma
 
 Generated handoff Markdown applies deterministic redaction to common credential assignments, authorization headers, private keys, JWTs, provider token formats, and credentials embedded in HTTP Git remotes. It also removes inline base64 media. Pattern-based redaction cannot recognize every private value, so review an export before posting it publicly.
 
+When Turntrail truncates a transcript turn or workspace diff, it stores the complete **sanitized**
+text in `.turntrail/attachments/` and links it from the omission marker. Attachments are named by
+their SHA-256 digest, deduplicated, integrity-checked on read, and garbage-collected when no retained
+export references them. They never contain the pre-redaction block, but they can still contain
+private source text that no pattern recognized. Treat them with the same care as handoff exports.
+
 ## Filesystem boundaries
 
 Account and session identifiers are restricted to safe filename segments. Manifest paths are resolved and verified inside their expected ledger directory before being read. Registry and manifest updates use atomic replacement plus a bounded cross-process lock so concurrent editor windows cannot silently discard each other's updates.

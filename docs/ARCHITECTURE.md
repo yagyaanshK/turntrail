@@ -195,6 +195,18 @@ If a budget is provided, the exporter includes turns by a deterministic priority
 
 Raw sessions remain available on disk even when not fully embedded.
 
+### Reversible export attachments
+
+Role caps and snapshot-diff caps keep a handoff readable, but their omission markers are reversible.
+Before truncation, Turntrail sanitizes the complete block and stores that sanitized text under
+`.turntrail/attachments/<sha256>.txt`. The marker in the handoff names the project-relative path and
+the expected SHA-256 digest. Identical content shares one file.
+
+Attachment hashes are recorded on the export manifest entry. When export retention removes an old
+handoff, an attachment is removed only if no retained export references its hash. Attachment reads
+validate the hash, enforce a byte ceiling, and resolve the path inside the ledger attachment
+directory. Raw, unredacted transcript content is never copied into an attachment.
+
 JSONL parsing is streaming and line-bounded. Discovery retains a bounded newest candidate set, and import/export enforce explicit turn and content ceilings. These limits bound memory without modifying the native source or the complete sessions already stored in the ledger; callers can deliberately raise them for unusually large workspaces. Core loops accept an abort signal, which the VS Code progress notification wires to its Cancel action.
 
 Inline media handling:

@@ -15,6 +15,7 @@ export {
   selectPreparedTurns,
   dedupeAdjacentTurns,
   truncateTurnContent,
+  prepareSnapshotDiff,
   DEFAULT_MAX_CHARS,
   DEFAULT_SNAPSHOT_DIFF_MAX_CHARS,
   DEFAULT_TOOL_MAX_CHARS,
@@ -46,6 +47,9 @@ export {
   readSessionPreview,
   renderSessionPreview,
   readManifest,
+  attachmentHash,
+  readAttachment,
+  writeAttachment,
   writeExport,
   writeSession,
   writeSnapshot,
@@ -54,7 +58,8 @@ export {
   DEFAULT_SESSION_PREVIEW_CHARS,
   DEFAULT_SESSION_PREVIEW_TURNS,
   DEFAULT_KEEP_EXPORTS,
-  DEFAULT_KEEP_SNAPSHOTS
+  DEFAULT_KEEP_SNAPSHOTS,
+  DEFAULT_MAX_ATTACHMENT_BYTES
 } from './store.js';
 export { createTurn, normalizeProvider, normalizeRole, normalizeSurface } from './schema.js';
 export { DEFAULT_PROVIDER_TIMEOUT_MS, providerFetch } from './accounts/http.js';

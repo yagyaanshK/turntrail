@@ -14,6 +14,7 @@ import {
   prepareTurns,
   pruneLedgerEntries,
   readAllTurns,
+  readAttachment,
   readManifest,
   renderHandoff,
   sanitizeContentForHandoff,
@@ -21,6 +22,7 @@ import {
   summarizeSession,
   truncateTurnContent,
   writeSession,
+  writeSnapshot,
   DEFAULT_MAX_CHARS
 } from '../src/index.js';
 
@@ -275,6 +277,57 @@ test('export collapses duplicate turns and truncates tool output', async () => {
   // The fixed safety header is not part of the transcript budget. Even with
   // that header, the truncated handoff must remain smaller than the raw turn.
   assert.ok(handoff.length < 5003);
+});
+
+test('export stores reversible sanitized attachments for truncated content', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-attachments-'));
+  await initStore(root);
+  const secret = `sk-test-${'A'.repeat(30)}`;
+  const fullOutput = `START\nAPI_KEY=${secret}\n${'middle-output\n'.repeat(600)}END`;
+  await writeSession(root, [
+    { role: 'tool', content: fullOutput, provider: 'openai', surface: 'cli', timestamp: '1' }
+  ], { provider: 'openai', surface: 'cli', sessionId: 'attachment-test' });
+
+  const exported = await exportHandoff(root, { target: 'claude', toolMaxChars: 500 });
+  const handoff = await fs.readFile(exported.path, 'utf8');
+  const match = handoff.match(/full sanitized content: ([^ ]+\/([a-f0-9]{64})\.txt) \(SHA-256 \2\)/);
+  assert.ok(match, 'handoff should name and hash the reversible attachment');
+  assert.equal(match[1].startsWith('.turntrail/attachments/'), true);
+
+  const attachment = await readAttachment(root, match[2]);
+  assert.match(attachment.content, /^START/);
+  assert.match(attachment.content, /END$/);
+  assert.match(attachment.content, /API_KEY=\[REDACTED\]/);
+  assert.doesNotMatch(attachment.content, new RegExp(secret));
+  assert.ok(attachment.content.length > 500);
+
+  const manifest = await readManifest(root);
+  assert.deepEqual(manifest.exports.at(-1).attachments, [match[2]]);
+});
+
+test('export stores a reversible sanitized attachment for a truncated snapshot diff', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-diff-attachment-'));
+  await initStore(root);
+  const secret = `sk-test-${'B'.repeat(30)}`;
+  await writeSnapshot(root, {
+    createdAt: '2026-01-01T00:00:00.000Z',
+    git: {
+      available: true,
+      branch: 'main',
+      head: 'abc123',
+      status: ' M app.js',
+      diffStat: 'app.js | 100 +',
+      diff: `diff --git a/app.js b/app.js\n+API_KEY=${secret}\n${'+line\n'.repeat(1000)}`
+    }
+  });
+
+  const exported = await exportHandoff(root, { target: 'codex', snapshotDiffMaxChars: 400 });
+  const handoff = await fs.readFile(exported.path, 'utf8');
+  const match = handoff.match(/full sanitized content: [^ ]+\/([a-f0-9]{64})\.txt/);
+  assert.ok(match);
+  const attachment = await readAttachment(root, match[1]);
+  assert.match(attachment.content, /API_KEY=\[REDACTED\]/);
+  assert.doesNotMatch(attachment.content, new RegExp(secret));
 });
 
 test('export with dedupe disabled keeps duplicate turns', async () => {

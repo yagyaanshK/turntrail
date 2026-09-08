@@ -140,7 +140,7 @@ A raw multi-tool session can be megabytes. Turntrail shrinks the **export** dete
 | Step | What it does |
 |------|--------------|
 | **Collapse duplicates** | Native logs record one message under several event types; consecutive identical turns are merged (legitimately-repeated output is kept). |
-| **Trim tool/system noise** | Oversized tool outputs (git diffs, dir listings) and repeated system blobs are middle-truncated, keeping head + tail. |
+| **Trim tool/system noise** | Oversized tool outputs (git diffs, dir listings) and repeated system blobs are middle-truncated, keeping head + tail. The complete sanitized content is stored as a SHA-256-addressed local attachment and linked from the exact marker. |
 | **Strip inline media** | Base64 screenshots are replaced with compact placeholders. |
 | **Redact secrets** | Common tokens, authorization headers, credential assignments, private keys, JWTs, and authenticated Git URLs are replaced deterministically. |
 | **Never summarize** | User and assistant prose is preserved verbatim. |
@@ -411,10 +411,10 @@ you choose; it does not silently fail over when one runs out.
   sessions/              # imported transcripts (JSONL, verbatim)
   snapshots/             # git + file-metadata snapshots
   exports/               # generated handoff markdown
-  attachments/
+  attachments/           # reversible sanitized content omitted from exports
 ```
 
-`.turntrail/` is **git-ignored by default** because the ledger contains private transcripts, command output, and file paths. Export redaction is defense in depth, not a reason to publish the ledger. See [docs/SECURITY.md](docs/SECURITY.md).
+`.turntrail/` is **git-ignored by default** because the ledger contains private transcripts, command output, and file paths. Export attachments contain redacted content rather than raw transcript bytes, are deduplicated by SHA-256, and are removed when no retained export references them. Export redaction is defense in depth, not a reason to publish the ledger. See [docs/SECURITY.md](docs/SECURITY.md).
 
 ---
 

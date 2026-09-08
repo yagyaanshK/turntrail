@@ -1,4 +1,13 @@
-import { latestSnapshot, readAllTurns, readManifest, writeExport } from './store.js';
+import path from 'node:path';
+import {
+  attachmentHash,
+  latestSnapshot,
+  readAllTurns,
+  readManifest,
+  writeAttachment,
+  writeExport
+} from './store.js';
+import { resolveLedger } from './fs-utils.js';
 import { mediaReferencesFromMetadata, safeMetadataValue, sanitizeContentForHandoff } from './media.js';
 import { summarizeSession } from './summary.js';
 import { describeReturn, lastSeenBy, originChat, stripHandoffPlumbing, turnsAfter } from './roundtrip.js';
@@ -52,8 +61,17 @@ export async function exportHandoff(root, options = {}) {
   const deduped = dedupe ? dedupeAdjacentTurns(windowed) : { turns: windowed, removed: 0 };
   const truncation = resolveTruncation(options);
   const maxChars = pickCap(options.maxChars, DEFAULT_MAX_CHARS);
-  const prepared = prepareTurns(deduped.turns, truncation);
+  const attachmentBase = path.posix.join(path.basename(resolveLedger(root)), 'attachments');
+  const prepared = prepareTurns(deduped.turns, truncation, { attachmentBase });
   const selection = selectPreparedTurns(prepared, maxChars);
+  const snapshotDiffMaxChars = pickCap(options.snapshotDiffMaxChars, DEFAULT_SNAPSHOT_DIFF_MAX_CHARS);
+  const preparedSnapshotDiff = prepareSnapshotDiff(snapshot, snapshotDiffMaxChars, { attachmentBase });
+  const attachmentItems = [
+    ...selection.prepared.filter((item) => item.attachment),
+    ...(preparedSnapshotDiff?.attachment ? [{ ...preparedSnapshotDiff, sanitizedContent: preparedSnapshotDiff.fullContent }] : [])
+  ];
+  await persistAttachments(root, attachmentItems);
+  const attachmentHashes = attachmentItems.map((item) => item.attachment.hash);
 
   const content = renderHandoff({
     target,
@@ -75,9 +93,10 @@ export async function exportHandoff(root, options = {}) {
     // the budget: the last request is the one thing that must never be dropped
     // because the session ran long.
     summary: options.summary === false ? undefined : summarizeSession(deduped.turns, options),
-    snapshotDiffMaxChars: pickCap(options.snapshotDiffMaxChars, DEFAULT_SNAPSHOT_DIFF_MAX_CHARS)
+    snapshotDiffMaxChars,
+    preparedSnapshotDiff
   });
-  return writeExport(root, target, content, { keep: options.keepExports });
+  return writeExport(root, target, content, { keep: options.keepExports, attachments: attachmentHashes });
 }
 
 // Collapse runs of identical role+content turns. Native logs (notably Codex)
@@ -106,29 +125,33 @@ export function dedupeAdjacentTurns(turns) {
 // Middle-truncate oversized content, keeping the head (e.g. the command and the
 // start of its output) and the tail (e.g. the result and exit code), which carry
 // the most signal for a reader skimming a tool turn.
-export function truncateTurnContent(content, maxChars) {
+export function truncateTurnContent(content, maxChars, options = {}) {
   const text = String(content || '');
   if (!maxChars || maxChars <= 0 || text.length <= maxChars) {
-    return { content: text, removed: 0 };
+    return { content: text, removed: 0, fullContent: text };
   }
   const head = Math.max(0, Math.floor(maxChars * 0.7));
   const tail = Math.max(0, maxChars - head);
   const removed = text.length - head - tail;
   const headPart = text.slice(0, head).replace(/\s+$/, '');
   const tailPart = tail > 0 ? text.slice(text.length - tail).replace(/^\s+/, '') : '';
-  const marker = `\n... [Turntrail truncated ${removed} chars] ...\n`;
-  return { content: `${headPart}${marker}${tailPart}`, removed };
+  const attachment = options.attachmentBase ? attachmentDescriptor(text, options.attachmentBase) : undefined;
+  const reference = attachment
+    ? `; full sanitized content: ${attachment.relativePath} (SHA-256 ${attachment.hash})`
+    : '';
+  const marker = `\n... [Turntrail truncated ${removed} chars${reference}] ...\n`;
+  return { content: `${headPart}${marker}${tailPart}`, removed, attachment, fullContent: text };
 }
 
 // Render every turn to its final markdown block exactly once. Sanitizing and
 // truncating up front is what lets the budget below measure the bytes that
 // actually land in the file, and it removes the second full pass over the
 // ledger that the old exporter paid for (once to size turns, once to render).
-export function prepareTurns(turns, truncation = {}) {
-  return turns.map((turn) => prepareTurn(turn, truncation));
+export function prepareTurns(turns, truncation = {}, options = {}) {
+  return turns.map((turn) => prepareTurn(turn, truncation, options));
 }
 
-function prepareTurn(turn, truncation) {
+function prepareTurn(turn, truncation, options) {
   const lines = [];
   lines.push(
     `### ${metadataText(turn.role)} | ${metadataText(turn.provider)}/${metadataText(turn.surface)} | ${metadataText(turn.timestamp || 'no timestamp')}`
@@ -149,11 +172,11 @@ function prepareTurn(turn, truncation) {
     lines.push('');
   }
 
-  return buildPreparedTurn(turn, lines, sanitized.content, truncation[turn.role]);
+  return buildPreparedTurn(turn, lines, sanitized.content, truncation[turn.role], options);
 }
 
-function buildPreparedTurn(turn, headerLines, sanitizedContent, maxContentChars) {
-  const truncated = truncateTurnContent(sanitizedContent, maxContentChars);
+function buildPreparedTurn(turn, headerLines, sanitizedContent, maxContentChars, options = {}) {
+  const truncated = truncateTurnContent(sanitizedContent, maxContentChars, options);
   const block = [...headerLines, '```text', truncated.content.replaceAll('```', '` ` `'), '```', ''].join('\n');
   return {
     turn,
@@ -163,6 +186,8 @@ function buildPreparedTurn(turn, headerLines, sanitizedContent, maxContentChars)
     // +1 for the newline that joins this block to the next one.
     size: block.length + 1,
     truncatedChars: truncated.removed,
+    attachment: truncated.attachment,
+    attachmentBase: options.attachmentBase,
     headerLines,
     sanitizedContent
   };
@@ -225,7 +250,9 @@ function fitPreparedTurn(item, maxChars) {
   let best;
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
-    const candidate = buildPreparedTurn(item.turn, item.headerLines, item.sanitizedContent, middle);
+    const candidate = buildPreparedTurn(item.turn, item.headerLines, item.sanitizedContent, middle, {
+      attachmentBase: item.attachmentBase
+    });
     if (candidate.size <= maxChars) {
       best = candidate;
       low = middle + 1;
@@ -233,7 +260,36 @@ function fitPreparedTurn(item, maxChars) {
       high = middle - 1;
     }
   }
-  return best || buildPreparedTurn(item.turn, item.headerLines, item.sanitizedContent, 1);
+  return best || buildPreparedTurn(item.turn, item.headerLines, item.sanitizedContent, 1, {
+    attachmentBase: item.attachmentBase
+  });
+}
+
+export function prepareSnapshotDiff(snapshot, maxChars, options = {}) {
+  const diff = snapshot?.git?.diff;
+  if (!diff) return undefined;
+  const fullContent = sanitizeContentForHandoff(diff).content;
+  return truncateTurnContent(fullContent, maxChars, options);
+}
+
+function attachmentDescriptor(content, attachmentBase) {
+  const hash = attachmentHash(content);
+  return {
+    hash,
+    relativePath: path.posix.join(attachmentBase, `${hash}.txt`)
+  };
+}
+
+async function persistAttachments(root, items) {
+  const unique = new Map();
+  for (const item of items) {
+    if (item?.attachment && typeof item.sanitizedContent === 'string') {
+      unique.set(item.attachment.hash, item.sanitizedContent);
+    }
+  }
+  await Promise.all(
+    [...unique.entries()].map(([hash, content]) => writeAttachment(root, content, { hash }))
+  );
 }
 
 export function selectTurns(turns, maxChars, truncation = {}) {
@@ -275,7 +331,8 @@ export function renderHandoff({
   sinceTimestamp,
   truncation = {},
   summary,
-  snapshotDiffMaxChars = DEFAULT_SNAPSHOT_DIFF_MAX_CHARS
+  snapshotDiffMaxChars = DEFAULT_SNAPSHOT_DIFF_MAX_CHARS,
+  preparedSnapshotDiff
 }) {
   const blocks = prepared || prepareTurns(turns, truncation);
   let truncatedTurns = 0;
@@ -345,7 +402,7 @@ export function renderHandoff({
       lines.push('```text');
       lines.push(fence(snapshot.git.status || '(clean or unavailable)'));
       lines.push('```');
-      lines.push(...renderUncommittedChanges(snapshot.git, snapshotDiffMaxChars));
+      lines.push(...renderUncommittedChanges(snapshot.git, snapshotDiffMaxChars, preparedSnapshotDiff));
     } else {
       lines.push('- Git: unavailable');
     }
@@ -491,7 +548,7 @@ function renderSummary(summary) {
   return lines;
 }
 
-function renderUncommittedChanges(git, maxChars) {
+function renderUncommittedChanges(git, maxChars, preparedDiff) {
   if (!git.diffStat && !git.diff) return [];
   const lines = [];
   lines.push('');
@@ -502,7 +559,7 @@ function renderUncommittedChanges(git, maxChars) {
   lines.push('```');
 
   if (git.diff) {
-    const truncated = truncateTurnContent(git.diff, maxChars);
+    const truncated = preparedDiff || prepareSnapshotDiff({ git }, maxChars);
     lines.push('');
     lines.push(git.diffClipped || truncated.removed > 0 ? 'Uncommitted diff (truncated):' : 'Uncommitted diff:');
     lines.push('');

@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { readJsonlObjects } from './adapters/common.js';
 import {
   ensureDir,
@@ -243,10 +244,68 @@ export async function writeExport(root, target, content, options = {}) {
     id,
     target,
     path: relativePath,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    attachments: normalizeAttachmentHashes(options.attachments)
   });
   await pruneLedgerEntries(root, 'exports', pickKeep(options.keep, DEFAULT_KEEP_EXPORTS));
   return { id, path: absolutePath, relativePath };
+}
+
+export const DEFAULT_MAX_ATTACHMENT_BYTES = 64 * 1024 * 1024;
+
+export function attachmentHash(content) {
+  return crypto.createHash('sha256').update(String(content ?? ''), 'utf8').digest('hex');
+}
+
+export async function writeAttachment(root, content, options = {}) {
+  await initStore(root);
+  const text = String(content ?? '');
+  const hash = attachmentHash(text);
+  if (options.hash !== undefined && validateAttachmentHash(options.hash) !== hash) {
+    throw new Error('Attachment content does not match its expected SHA-256 hash.');
+  }
+
+  const ledger = resolveLedger(root);
+  const attachmentsDir = await resolveExistingInside(ledger, path.join(ledger, 'attachments'));
+  const fileName = `${hash}.txt`;
+  const absolutePath = resolveInside(attachmentsDir, fileName);
+
+  await withFileLock(absolutePath, async () => {
+    if (await pathExists(absolutePath)) {
+      const existing = await fs.readFile(absolutePath, 'utf8');
+      if (attachmentHash(existing) !== hash) {
+        throw new Error(`Attachment hash collision or corrupt attachment: ${hash}`);
+      }
+      return;
+    }
+    await writeFileAtomic(absolutePath, text);
+  }, options);
+
+  return {
+    hash,
+    path: absolutePath,
+    relativePath: path.join(path.basename(ledger), 'attachments', fileName).replaceAll('\\', '/'),
+    chars: text.length,
+    bytes: Buffer.byteLength(text, 'utf8')
+  };
+}
+
+export async function readAttachment(root, hash, options = {}) {
+  const normalized = validateAttachmentHash(hash);
+  const ledger = resolveLedger(root);
+  const attachmentsDir = await resolveExistingInside(ledger, path.join(ledger, 'attachments'));
+  const candidate = resolveInside(attachmentsDir, `${normalized}.txt`);
+  const absolutePath = await resolveExistingInside(attachmentsDir, candidate);
+  const stat = await fs.stat(absolutePath);
+  const maxBytes = positiveLimit(options.maxBytes, DEFAULT_MAX_ATTACHMENT_BYTES);
+  if (stat.size > maxBytes) {
+    throw new Error(`Attachment exceeds the ${maxBytes}-byte safety limit.`);
+  }
+  const content = await fs.readFile(absolutePath, 'utf8');
+  if (attachmentHash(content) !== normalized) {
+    throw new Error(`Attachment failed SHA-256 verification: ${normalized}`);
+  }
+  return { hash: normalized, path: absolutePath, content, bytes: stat.size };
 }
 
 // Drop the oldest manifest entries of a kind, deleting their files.
@@ -277,11 +336,44 @@ export async function pruneLedgerEntries(root, key, keep) {
       removed++;
     }
 
-    manifest[key] = entries.slice(entries.length - keep);
+    const retained = entries.slice(entries.length - keep);
+    if (key === 'exports') {
+      const retainedAttachments = new Set(retained.flatMap((entry) => normalizeAttachmentHashes(entry?.attachments)));
+      const staleAttachments = new Set(stale.flatMap((entry) => normalizeAttachmentHashes(entry?.attachments)));
+      const attachmentsDir = await resolveExistingInside(ledger, path.join(ledger, 'attachments'));
+      for (const hash of staleAttachments) {
+        if (retainedAttachments.has(hash)) continue;
+        const attachmentPath = resolveInside(attachmentsDir, `${hash}.txt`);
+        await fs.rm(attachmentPath, { force: true });
+      }
+    }
+
+    manifest[key] = retained;
     manifest.updatedAt = new Date().toISOString();
     await writeManifest(root, manifest);
     return { removed };
   });
+}
+
+function validateAttachmentHash(value) {
+  const hash = String(value || '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(hash)) {
+    throw new Error('Attachment hash must be a 64-character SHA-256 hexadecimal value.');
+  }
+  return hash;
+}
+
+function normalizeAttachmentHashes(values) {
+  if (!Array.isArray(values)) return [];
+  const hashes = [];
+  for (const value of values) {
+    try {
+      hashes.push(validateAttachmentHash(value));
+    } catch {
+      // A hand-edited manifest must not turn attachment cleanup into a path operation.
+    }
+  }
+  return [...new Set(hashes)].sort();
 }
 
 function pickKeep(value, fallback) {
