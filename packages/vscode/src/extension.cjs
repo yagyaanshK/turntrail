@@ -1018,6 +1018,7 @@ function pickableSessions(sessions, origin) {
         relativeTime(session.modifiedAt),
         session.surface,
         session.forkedFrom ? 'forked' : undefined,
+        session.subagent ? 'subagent' : undefined,
         formatSize(session.size),
         session.matchesProject ? undefined : 'other folder'
       ]
@@ -1101,7 +1102,7 @@ async function importLatest(provider) {
   }
   const result = await withProgress(`Importing ${provider} session`, async ({ signal }) => {
     await initStore(root);
-    return importNativeSession(root, provider, { path: resolved.session.path, includeArchived: true, signal });
+    return importNativeSession(root, provider, { path: resolved.session.path, ...importOptions(), signal });
   });
   await reportImport(provider, result);
 }
@@ -1111,7 +1112,7 @@ async function importSession(provider, session) {
   const { initStore, importNativeSession } = await core();
   const result = await withProgress(`Importing ${provider} session`, async ({ signal }) => {
     await initStore(root);
-    return importNativeSession(root, provider, { path: session.path, includeArchived: true, signal });
+    return importNativeSession(root, provider, { path: session.path, ...importOptions(), signal });
   });
   await reportImport(provider, result);
 }
@@ -1138,7 +1139,7 @@ async function importIndexedSession(item) {
   const { initStore, importNativeSession } = await core();
   const result = await withProgress(`Importing ${row.provider} session`, async ({ signal }) => {
     await initStore(root);
-    return importNativeSession(root, row.provider, { path: row.path, includeArchived: true, signal });
+    return importNativeSession(root, row.provider, { path: row.path, ...importOptions(), signal });
   });
   sessionsProvider.markImported(row.id, result);
   vscode.window.showInformationMessage(`Turntrail: imported ${result.turnCount} turns from ${row.provider}.`);
@@ -1290,7 +1291,7 @@ async function handoff(target, mode, selected, delivery = 'clipboard') {
   const result = await withProgress(`Creating handoff to ${target}`, async ({ signal }) => {
     await initStore(root);
     if (resolved.session) {
-      const imported = await importNativeSession(root, source, { path: resolved.session.path, includeArchived: true, signal });
+      const imported = await importNativeSession(root, source, { path: resolved.session.path, ...importOptions(), signal });
       if (selected?.id) sessionsProvider.markImported(selected.id, imported);
     }
     await captureSnapshot(root, { signal });
@@ -1466,6 +1467,16 @@ async function findAgentCommand(target) {
 
 function setting(key) {
   const canonical = vscode.workspace.getConfiguration('turntrail').inspect(key);
+// Options every native import from this extension shares.
+function importOptions() {
+  return {
+    includeArchived: true,
+    // Whether a Claude Code session that launched agents carries their whole
+    // recordings, or only each agent's final report.
+    subagentTranscripts: setting('subagentTranscripts') === true
+  };
+}
+
   const legacy = vscode.workspace.getConfiguration('contextBridge').inspect(key);
   return explicitSetting(canonical) ?? explicitSetting(legacy) ?? canonical?.defaultValue;
 }

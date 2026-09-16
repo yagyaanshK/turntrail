@@ -75,7 +75,21 @@ Claude Code:
 
 ```text
 ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
+~/.claude/projects/<encoded-project-path>/<session-id>/subagents/agent-<agent-id>.jsonl
+~/.claude/projects/<encoded-project-path>/<session-id>/subagents/agent-<agent-id>.meta.json
 ```
+
+Each agent the `Agent` tool launches is recorded in its own file beside the parent. Every line of it
+carries `isSidechain: true`, the `agentId` and the parent's `sessionId`; the meta file holds the
+agent type and the description the parent gave it. Context compaction reuses the layout with
+`acompact-` ids and no meta file. In the parent, a foreground launch returns the agent's report in
+its tool result, while a background launch returns only the agent id (`toolUseResult.status:
+"async_launched"`), the agent hands its report back through a `SubagentHandback` tool call in its
+own file, and the parent receives a `queue-operation` line whose content is a `<task-notification>`
+block. Discovery skips subagent recordings unless `includeSubagents` is set, and lists them with a
+session id of `<parent>-agent-<agent-id>` so an import can never overwrite the parent. Importing a
+parent splices each background agent's handback (or, with `subagentTranscripts`, its whole
+recording) in after the launching turn, and renders the notification as a one-line system turn.
 
 Codex:
 

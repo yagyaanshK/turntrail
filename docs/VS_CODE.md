@@ -74,6 +74,12 @@ same provider. An oversized individual record inside a transcript (such as a Cod
 record on a long thread) is skipped and noted in the imported session rather than failing the
 import.
 
+A Claude Code session that launched background agents (the ones the Agent map shows) imports with
+each agent's final report spliced in right after the turn that launched it, so a handoff carries
+what the agents found. The agents' own recordings are not listed as sessions. Set
+`turntrail.subagentTranscripts` to splice their whole recordings into the import instead of only
+the reports.
+
 Gemini and Cursor are currently source providers. Their sessions can be imported, viewed, and handed
 off to Claude or Codex, but Turntrail does not yet open or inject prompts into Gemini or Cursor.
 

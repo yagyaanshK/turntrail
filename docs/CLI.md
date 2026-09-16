@@ -74,9 +74,15 @@ turntrail import-native --provider claude --session <session-id>
 By default, native import searches for sessions whose recorded working directory matches the current project. Use `--all` if you intentionally want to import across projects.
 
 Native files are read-only inputs. Turntrail does not modify `~/.claude`, `~/.codex`, `~/.gemini`,
-or `~/.cursor`. Gemini's legacy JSON and current JSONL recordings are both supported. Cursor's main
-Agent transcripts are imported by default; nested subagent recordings are excluded to avoid adding
-duplicate implementation noise.
+or `~/.cursor`. Gemini's legacy JSON and current JSONL recordings are both supported. Claude Code's
+and Cursor's main transcripts are imported by default; the nested subagent recordings both keep
+beside a session are left out of `discover` and `import-native --last` unless
+`--include-subagents` is given, which lists each under the name its parent gave it and with a
+session id of its own.
+
+When a Claude Code session launched background agents, importing it splices each agent's final
+report in right after the turn that launched it, so the handoff carries what the agents found.
+`import-native --subagent-transcripts` splices the agents' whole recordings instead.
 
 ## `run`
 

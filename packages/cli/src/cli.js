@@ -30,8 +30,8 @@ const HELP = `Turntrail
 Usage:
   turntrail init [--cwd <path>]
   turntrail import --provider <name> [--surface <name>] <file> [--cwd <path>]
-  turntrail discover --provider claude|codex|gemini|cursor [--all] [--cwd <path>]
-  turntrail import-native --provider claude|codex|gemini|cursor [--last|--session <id>] [--all] [--cwd <path>]
+  turntrail discover --provider claude|codex|gemini|cursor [--all] [--include-subagents] [--cwd <path>]
+  turntrail import-native --provider claude|codex|gemini|cursor [--last|--session <id>] [--all] [--subagent-transcripts] [--cwd <path>]
   turntrail run claude|codex|gemini|cursor [-- <native args>] [--cwd <path>]
   turntrail snapshot [--cwd <path>]
   turntrail export --to <target> [--max-chars <n>] [--no-dedupe] [--since-last-export]
@@ -116,7 +116,8 @@ export async function runCli(argv, io = process, dependencies = {}) {
     const sessions = await discoverNativeSessions(flags.provider, {
       root: cwd,
       all: Boolean(flags.all),
-      includeArchived: Boolean(flags.includeArchived)
+      includeArchived: Boolean(flags.includeArchived),
+      includeSubagents: Boolean(flags.includeSubagents)
     });
     io.stdout.write(renderSessions(sessions));
     return;
@@ -129,7 +130,9 @@ export async function runCli(argv, io = process, dependencies = {}) {
       all: Boolean(flags.all),
       last: Boolean(flags.last) || !flags.session,
       sessionId: flags.session,
-      includeArchived: Boolean(flags.includeArchived)
+      includeArchived: Boolean(flags.includeArchived),
+      includeSubagents: Boolean(flags.includeSubagents),
+      subagentTranscripts: Boolean(flags.subagentTranscripts)
     });
     io.stdout.write(`Imported native session into ${result.relativePath} (${result.turnCount} turns)\n`);
     return;
@@ -440,7 +443,7 @@ function renderSessions(sessions) {
     lines.push([
       session.sessionId,
       session.provider,
-      session.surface,
+      session.subagent ? `${session.surface} (subagent of ${session.parentSessionId || 'unknown'})` : session.surface,
       session.matchesProject ? 'project' : 'all',
       session.modifiedAt,
       session.cwd || '(no cwd)',

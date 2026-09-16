@@ -109,7 +109,9 @@ which the app does not list. For those the opening request is a poor stand-in, b
 forked from a common parent share it word for word and would render as identical rows, so the most
 recent substantive request leads instead — that is where they diverge. Trailing replies like "yes" or
 "continue" are skipped when choosing it. Every row also carries age, surface, size and whether the
-session was forked, and subagent transcripts are labelled as such.
+session was forked. Subagent recordings, which Claude Code and Cursor keep in files of their own
+beside the parent, stay out of the list unless asked for (`discover --include-subagents`) and are
+then labelled as subagents and named the way the parent named them.
 
 Set `turntrail.alwaysUseLatestSession` to skip the question and always take the newest.
 
@@ -147,7 +149,7 @@ A raw multi-tool session can be megabytes. Turntrail shrinks the **export** dete
 
 The ledger header of every export reports exactly what was collapsed and truncated.
 
-JSONL sources are streamed rather than loaded as one string. Discovery, imported turn counts, and the ledger window used by one export have explicit safety limits with actionable errors instead of consuming unbounded extension-host memory. An individual record larger than 8 MiB (Codex writes one on every context compaction of a long thread) is skipped as it streams past and recorded as a one-line system turn naming the line and record type, so a single oversized line never fails the import. VS Code discovery/import/handoff notifications are cancellable. If the newest user request alone is larger than the export budget, Turntrail includes a head-and-tail truncation of that request rather than dropping it behind assistant output.
+JSONL sources are streamed rather than loaded as one string. Discovery, imported turn counts, and the ledger window used by one export have explicit safety limits with actionable errors instead of consuming unbounded extension-host memory. An individual record larger than 8 MiB (Codex writes one on every context compaction of a long thread) is skipped as it streams past and recorded as a one-line system turn naming the line and record type, so a single oversized line never fails the import. When a Claude Code session launched background agents, each agent's final report is spliced into the import right after the turn that launched it, so a handoff carries what the agents found and not just that they were started; the `turntrail.subagentTranscripts` setting (or `import-native --subagent-transcripts`) splices the agents' whole recordings instead. VS Code discovery/import/handoff notifications are cancellable. If the newest user request alone is larger than the export budget, Turntrail includes a head-and-tail truncation of that request rather than dropping it behind assistant output.
 
 ---
 
