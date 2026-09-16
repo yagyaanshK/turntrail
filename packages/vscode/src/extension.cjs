@@ -30,7 +30,12 @@ let accountMaintenanceOffer;
 
 async function activateExtension(context) {
   accountsProvider = new AccountsStore(core);
-  accountsWebview = new AccountsWebview(accountsProvider);
+  accountsWebview = new AccountsWebview(accountsProvider, {
+    maintenance: () => {
+      const config = accountMaintenanceConfig();
+      return { enabled: config.enabled, intervalHours: Math.round(config.intervalMs / 3600000) };
+    }
+  });
   managedTerminals = new ManagedTerminalStore();
   sessionsProvider = new SessionsStore(core, workspaceRoot, { discoveryOptions: accountSessionDiscoveryOptions });
   sessionsWebview = new SessionsWebview(sessionsProvider);
@@ -103,7 +108,7 @@ async function activateExtension(context) {
         event.affectsConfiguration('turntrail.accountMaintenance') ||
         event.affectsConfiguration('contextBridge.accountMaintenance')
       ) {
-        accountMaintenance.reschedule();
+        rescheduleAccountMaintenance();
       }
     })
   );
@@ -801,11 +806,18 @@ function accountMaintenanceConfig() {
   };
 }
 
+// The panel shows the maintenance switch, so it must learn about every change
+// to it, whichever way the change was made.
+function rescheduleAccountMaintenance() {
+  accountMaintenance.reschedule();
+  accountsWebview?.refresh().catch(() => {});
+}
+
 async function toggleAccountMaintenance() {
   const configuration = vscode.workspace.getConfiguration('turntrail');
   const enabled = !accountMaintenanceConfig().enabled;
   await configuration.update('accountMaintenance.enabled', enabled, vscode.ConfigurationTarget.Global);
-  accountMaintenance.reschedule();
+  rescheduleAccountMaintenance();
   const message = enabled
     ? 'Background account maintenance is enabled. Turntrail will contact provider token and usage endpoints about every five hours.'
     : 'Background account maintenance is disabled.';
@@ -828,7 +840,7 @@ async function runAccountMaintenance() {
     await vscode.workspace
       .getConfiguration('turntrail')
       .update('accountMaintenance.enabled', true, vscode.ConfigurationTarget.Global);
-    accountMaintenance.reschedule();
+    rescheduleAccountMaintenance();
   }
 
   const maintenance = await vscode.window.withProgress(
@@ -878,7 +890,7 @@ async function offerAccountMaintenance(context) {
   await vscode.workspace
     .getConfiguration('turntrail')
     .update('accountMaintenance.enabled', true, vscode.ConfigurationTarget.Global);
-  accountMaintenance.reschedule();
+  rescheduleAccountMaintenance();
   const maintenance = await accountMaintenance.runNow();
   const message = maintenance
     ? `Account maintenance is enabled and the first check completed - ${maintenanceSummary(maintenance)}.`
@@ -1465,8 +1477,6 @@ async function findAgentCommand(target) {
   return commands.find((item) => safeAgentCommand(item, target, commands));
 }
 
-function setting(key) {
-  const canonical = vscode.workspace.getConfiguration('turntrail').inspect(key);
 // Options every native import from this extension shares.
 function importOptions() {
   return {
@@ -1477,6 +1487,8 @@ function importOptions() {
   };
 }
 
+function setting(key) {
+  const canonical = vscode.workspace.getConfiguration('turntrail').inspect(key);
   const legacy = vscode.workspace.getConfiguration('contextBridge').inspect(key);
   return explicitSetting(canonical) ?? explicitSetting(legacy) ?? canonical?.defaultValue;
 }

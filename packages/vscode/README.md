@@ -250,8 +250,9 @@ may then verify that account safely. Turntrail otherwise synchronizes the live c
 the managed snapshot so a later switch does not reinstall an older refresh token.
 
 Background maintenance is **off by default**. Turntrail offers one opt-in after the first managed
-Codex or Claude account appears. You can also run **Turntrail: Toggle Background Account
-Maintenance** or **Turntrail: Run Account Maintenance Now**. While an editor is open, Turntrail then
+Codex or Claude account appears. The switch also lives in the **Maintenance** card at the bottom of
+the Accounts panel, and the **Turntrail: Toggle Background Account Maintenance** and **Turntrail:
+Run Account Maintenance Now** commands do the same. While an editor is open, Turntrail then
 performs a jittered maintenance run about every five hours: refresh due inactive OAuth credentials,
 read quota, and update the local cache. A machine-wide lock prevents simultaneous refreshes from
 multiple VS Code-compatible editors or a CLI scheduler. API-key accounts are skipped, and no

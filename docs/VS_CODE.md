@@ -154,8 +154,10 @@ or retries the redemption POST.
 | **Remove** | Forget the account, or delete its managed credentials and active default login. Confirmed inline. |
 
 Background account maintenance is disabled by default. Turntrail offers a one-time opt-in after a
-managed Codex or Claude account is detected. The toggle and **Run Account Maintenance Now** commands
-remain available. Maintenance runs about every five hours while the editor is open. It fetches
+managed Codex or Claude account is detected. That notification is easy to miss, so the switch also
+lives in the **Maintenance** card at the bottom of the Accounts panel, with a **Run now** button
+beside it; the toggle and **Run Account Maintenance Now** commands remain available too.
+Maintenance runs about every five hours while the editor is open. It fetches
 quota, renews inactive OAuth accounts,
 and synchronizes provider-owned credentials back into Turntrail's snapshot. When no Claude process
 is running, it also proactively renews the active Claude credential and updates the official live

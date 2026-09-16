@@ -1,7 +1,7 @@
 {
   "name": "turntrail-workspace",
   "private": true,
-  "version": "0.18.2",
+  "version": "0.18.3",
   "description": "Vendor-neutral handoff layer for continuing developer agent sessions across Codex, Claude, and other tools.",
   "type": "module",
   "workspaces": [
@@ -12,7 +12,7 @@
   "scripts": {
     "test": "node --test packages/core/test/*.test.js packages/cli/test/*.test.js packages/vscode/test/*.test.cjs",
     "test:vscode-integration": "node scripts/test-vscode-integration.mjs",
-    "lint": "node scripts/check-syntax.mjs && node scripts/check-webview-scripts.mjs && node scripts/check-packages.mjs",
+    "lint": "node scripts/check-syntax.mjs && node scripts/check-webview-scripts.mjs && node scripts/check-module-scope.mjs && node scripts/check-packages.mjs",
     "check:packages": "node scripts/check-packages.mjs",
     "package:vscode": "node scripts/package-vscode.mjs",
     "marketing:fixture": "node scripts/create-marketing-fixture.mjs",

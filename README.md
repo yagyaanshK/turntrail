@@ -334,8 +334,9 @@ or the retained Claude profile, identifies the account unambiguously. API-key ac
 OAuth token to maintain and are skipped.
 
 Background maintenance is **off by default**. When a managed Codex or Claude account is first
-detected, Turntrail offers a one-time opt-in; you can also run **Turntrail: Toggle Background Account
-Maintenance** or **Turntrail: Run Account Maintenance Now**. Enabled maintenance runs about every
+detected, Turntrail offers a one-time opt-in; the switch also lives in the **Maintenance** card at the
+bottom of the Accounts panel, and the **Turntrail: Toggle Background Account Maintenance** and
+**Turntrail: Run Account Maintenance Now** commands do the same. Enabled maintenance runs about every
 five hours while an editor is open, with timing jitter. Each run updates quota caches and renews due
 inactive OAuth accounts only when credential ownership is safe. A machine-wide lock prevents several
 VS Code-compatible editors or CLI jobs from refreshing the same token concurrently. If Claude is

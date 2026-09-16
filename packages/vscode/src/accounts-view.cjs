@@ -229,10 +229,18 @@ function pool(rows) {
 }
 
 class AccountsWebview {
-  constructor(store) {
+  // `options.maintenance` reports the background maintenance state so the
+  // panel can offer the switch itself. The one-time prompt at startup is easy
+  // to miss, and a setting nobody can find is as good as no setting.
+  constructor(store, options = {}) {
     this.store = store;
+    this.options = options;
     this.view = undefined;
     store.onDidChange((model) => this.post(model));
+  }
+
+  async refresh() {
+    this.post(await this.store.viewModel());
   }
 
   async resolveWebviewView(view) {
@@ -253,6 +261,8 @@ class AccountsWebview {
         import: 'turntrail.importAccount',
         refresh: 'turntrail.refreshAccountQuota',
         useReset: 'turntrail.useCodexReset',
+        toggleMaintenance: 'turntrail.toggleAccountMaintenance',
+        runMaintenance: 'turntrail.runAccountMaintenance',
         handoff: 'turntrail.createHandoff',
         openHandoff: 'turntrail.openLatestHandoff',
         copyHandoff: 'turntrail.copyLatestHandoffPrompt'
@@ -282,7 +292,14 @@ class AccountsWebview {
   }
 
   post(model) {
-    if (this.view?.visible) this.view.webview.postMessage({ type: 'state', model });
+    if (!this.view?.visible) return;
+    let maintenance;
+    try {
+      maintenance = this.options.maintenance?.();
+    } catch {
+      maintenance = undefined;
+    }
+    this.view.webview.postMessage({ type: 'state', model: maintenance ? { ...model, maintenance } : model });
   }
 }
 
@@ -855,7 +872,30 @@ function render(model) {
   root.innerHTML = '<div class="agents">' +
     model.sections.map(renderSection).join('') +
     renderHandoff(model.handoff) +
+    renderMaintenance(model.maintenance) +
     '</div>';
+}
+
+// The switch for background credential maintenance. It is offered once at
+// startup in a notification that is gone in seconds; this is where it lives.
+function renderMaintenance(maintenance) {
+  if (!maintenance) return '';
+  const on = maintenance.enabled === true;
+  const every = maintenance.intervalHours ? 'about every ' + esc(String(maintenance.intervalHours)) + ' hours' : 'periodically';
+  return '<section class="agent" data-provider="maintenance">' +
+    '<span class="agent-name">Maintenance</span>' +
+    '<div class="handoff">' +
+      '<div class="handoff-lede">Background maintenance is <b>' + (on ? 'on' : 'off') + '</b>. ' +
+        (on
+          ? 'Inactive Codex and Claude logins are renewed and usage is checked ' + every + ' while an editor is open.'
+          : 'When on, inactive Codex and Claude logins are renewed and usage is checked ' + every + ' while an editor is open. It contacts only the providers.') +
+      '</div>' +
+      '<div class="last">' +
+        '<button class="primary" data-act="toggleMaintenance">' + (on ? 'Turn off' : 'Turn on') + '</button>' +
+        '<button data-act="runMaintenance">Run now</button>' +
+      '</div>' +
+    '</div>' +
+  '</section>';
 }
 
 // Confirmation for a destructive action happens here, in the card, so acting on

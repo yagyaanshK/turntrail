@@ -2,7 +2,7 @@
   "name": "context-bridge-vscode",
   "displayName": "Turntrail",
   "description": "Continue developer agent sessions across Claude, Codex, and other tools from VS Code.",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "publisher": "turntrail",
   "license": "MIT",
   "type": "commonjs",
@@ -336,17 +336,17 @@
           "default": true,
           "description": "Collapse consecutive duplicate turns. Native logs (e.g. Codex) record each message under several event types, producing 2-3 identical copies; this removes the repeats."
         },
+        "turntrail.subagentTranscripts": {
+          "type": "boolean",
+          "default": false,
+          "description": "When a Claude Code session launched background agents, import each agent's whole recording into the session rather than only its final report. Off by default: the report is what the parent acted on, and full recordings can multiply the turns a handoff has to fit."
+        },
         "turntrail.toolMaxChars": {
           "type": "number",
           "default": 2000,
           "description": "Truncate tool-output turns longer than this many characters (keeping head and tail). 0 disables truncation. Tool outputs like git diffs and directory listings dominate handoff size."
         },
         "turntrail.systemMaxChars": {
-        "turntrail.subagentTranscripts": {
-          "type": "boolean",
-          "default": false,
-          "description": "When a Claude Code session launched background agents, import each agent's whole recording into the session rather than only its final report. Off by default: the report is what the parent acted on, and full recordings can multiply the turns a handoff has to fit."
-        },
           "type": "number",
           "default": 800,
           "description": "Truncate system turns (e.g. repeated turn-context blobs) longer than this many characters. 0 disables truncation."
@@ -547,7 +547,7 @@
     }
   },
   "dependencies": {
-    "@turntrail/core": "0.18.2"
+    "@turntrail/core": "0.18.3"
   },
   "devDependencies": {
     "@types/vscode": "^1.95.0"

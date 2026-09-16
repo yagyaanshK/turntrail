@@ -401,6 +401,11 @@ function render() {
   const errors = (model.errors || []).length ? '<div class="errors">' + model.errors.map(function (error) {
     return '<div><b>' + esc(label(error.provider)) + ':</b> ' + esc(error.message) + '</div>';
   }).join('') + '</div>' : '';
+  // Rendering replaces the search box, so typing would lose focus and the
+  // caret with every keystroke. Remember where they were and put them back.
+  const active = document.activeElement;
+  const typing = active && active.classList && active.classList.contains('search');
+  const caret = typing ? [active.selectionStart, active.selectionEnd] : null;
   root.className = model.loading ? 'loading' : '';
   root.innerHTML =
     managedSessions() +
@@ -409,7 +414,24 @@ function render() {
     '<div class="scope"><button data-scope="false" aria-pressed="' + (!model.all) + '">Workspace</button><button data-scope="true" aria-pressed="' + model.all + '">Everywhere</button></div>' +
     '<div class="summary"><span>' + rows.length + ' of ' + (model.sessions || []).length + ' sessions' + (model.loading ? ' | scanning' : '') + '</span><button class="refresh" data-act="refresh" title="Refresh sessions" aria-label="Refresh sessions">&#x21bb;</button></div>' +
     errors +
-    '<div class="list">' + (rows.length ? rows.map(card).join('') : '<div class="empty">No sessions match this view.</div>') + '</div>';
+    '<div class="list">' + (rows.length ? rows.map(card).join('') : '<div class="empty">' + emptyMessage(needle || provider !== 'all') + '</div>') + '</div>';
+  if (typing) {
+    const search = root.querySelector('.search');
+    if (search) {
+      search.focus();
+      if (caret && typeof search.setSelectionRange === 'function') {
+        try { search.setSelectionRange(caret[0], caret[1]); } catch (error) { /* not a text control */ }
+      }
+    }
+  }
+}
+
+// A chat is listed under Workspace only when it was started in the open
+// folder. Agents often run from a sibling folder, so say where else to look.
+function emptyMessage(filtered) {
+  if (filtered) return 'No sessions match this search.';
+  if (model.all) return 'No sessions were found on this machine.';
+  return 'No sessions were started in this workspace folder. Chats started in other folders are under Everywhere.';
 }
 
 root.addEventListener('input', function (event) {
