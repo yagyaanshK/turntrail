@@ -276,6 +276,13 @@ Continue in this existing session using this Turntrail handoff:
 Read the handoff before acting...
 ```
 
+Every prompt ends by leaving two decisions to the user rather than to whatever the transcript
+implies. The receiving agent is told to check whether `.turntrail/` is already tracked or ignored in
+the repository's git history and, if it is neither, to ask whether to commit it or add it to
+`.gitignore`; and not to start on the task the transcript implies but, once it has the project
+context, to ask whether to continue where the source chat left off or whether there is a new
+standing instruction, and to wait for the answer. The handoff document's own rules say the same.
+
 A handoff into a **new** chat also says what that chat should be called, so the two conversations
 sit together in either app's sidebar: the source chat's own name with "(handoff)" appended, for
 example `This chat should be named "sorted inference (handoff)".` The line is only added when the

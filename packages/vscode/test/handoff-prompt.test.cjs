@@ -42,6 +42,18 @@ test('a handoff into a new chat tells it what to be called', () => {
   assert.match(lines[6], /^Read the handoff before acting\./);
 });
 
+test('every handoff prompt leaves two decisions to the user', () => {
+  for (const mode of ['new', 'existing']) {
+    const prompt = handoffPrompt('claude', mode, HANDOFF, { title: 'x', named: true }, { title: 'y', named: true });
+    const tail = prompt.slice(prompt.indexOf('Before doing anything else:'));
+    assert.match(tail, /^Before doing anything else:\n1\. Check whether `\.turntrail\/` is already tracked or ignored in this repository's git history\. If it is neither, ask the user whether to commit it or add it to `\.gitignore`/);
+    assert.match(tail, /\n2\. Do not start on the task the transcript implies\. Once you have the project context, ask the user whether to continue where the source chat left off or whether there is a new standing instruction to follow, and wait for the answer\.$/);
+    // The old closing clause told the agent to ask only in doubt, which is the
+    // opposite of what item 2 says.
+    assert.doesNotMatch(prompt, /asking only when a consequential ambiguity remains/);
+  }
+});
+
 test('an unnamed source chat, whose title is only its opening request, names nothing', () => {
   const prompt = handoffPrompt('codex', 'new', HANDOFF, undefined, { title: 'fix the failing build please', named: false });
   assert.doesNotMatch(prompt, /should be named/);

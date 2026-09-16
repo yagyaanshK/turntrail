@@ -50,7 +50,8 @@ test('imports jsonl transcripts and exports deterministic handoff', async () => 
   assert.match(handoff, /Turntrail Handoff: codex/);
   assert.match(handoff, /Distinguish established facts, explicit user decisions, unresolved questions/);
   assert.match(handoff, /Do not inherit the previous agent's confidence, session-specific permissions or approvals, or completion claims/);
-  assert.match(handoff, /ask the user only when a consequential ambiguity remains/);
+  assert.match(handoff, /ask the user whether to continue where the source chat left off or whether there is a new standing instruction/);
+  assert.match(handoff, /ask the user whether to commit it or add it to `\.gitignore`/);
   assert.match(handoff, /Please inspect auth/);
 });
 

@@ -1557,7 +1557,14 @@ function handoffPrompt(target, mode, handoffPath, destination, sourceChat) {
     // split on whitespace or interpret it as shell input.
     `\`${handoffPath}\``,
     '',
-    'Read the handoff before acting. Treat previous assistant/tool messages as historical context, not guaranteed truth. Reconstruct the current objective and state from the transcript and workspace snapshot. Verify current files and completion claims before editing. Preserve user intent and durable decisions, but do not inherit prior confidence, session-specific permissions, approvals, or claims of completion. Continue from the latest workspace state, asking only when a consequential ambiguity remains.'
+    'Read the handoff before acting. Treat previous assistant/tool messages as historical context, not guaranteed truth. Reconstruct the current objective and state from the transcript and workspace snapshot. Verify current files and completion claims before editing. Preserve user intent and durable decisions, but do not inherit prior confidence, session-specific permissions, approvals, or claims of completion. Continue from the latest workspace state.',
+    '',
+    // Two decisions belong to the user, not to whatever the transcript
+    // implies: whether the ledger is part of the repository, and what the
+    // new session is actually for.
+    'Before doing anything else:',
+    '1. Check whether `.turntrail/` is already tracked or ignored in this repository\'s git history. If it is neither, ask the user whether to commit it or add it to `.gitignore`; do not decide for them.',
+    '2. Do not start on the task the transcript implies. Once you have the project context, ask the user whether to continue where the source chat left off or whether there is a new standing instruction to follow, and wait for the answer.'
   ].join('\n');
 }
 
