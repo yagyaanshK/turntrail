@@ -999,6 +999,24 @@ async function ledgerOriginChat(root, target) {
   }
 }
 
+// The chat a handoff is made from. A native session says whether the agent
+// named it; a ledger-only row does not, so its manifest entry is consulted;
+// with neither, the source provider's latest imported chat is the one.
+async function handoffSourceChat(root, source, nativeSession, selected) {
+  if (nativeSession) return { title: nativeSession.title, named: Boolean(nativeSession.named) };
+  if (selected?.ledgerSessionId) {
+    try {
+      const { readManifest } = await core();
+      const manifest = await readManifest(root);
+      const entry = (manifest?.sessions || []).find((session) => session?.id === selected.ledgerSessionId);
+      if (entry) return { title: entry.title, named: Boolean(entry.named) };
+    } catch {
+      // Fall through to the provider's latest chat.
+    }
+  }
+  return ledgerOriginChat(root, source);
+}
+
 // A session already in the ledger is almost always the one meant: it is the
 // chat this workspace's handoffs have been built from. It leads the list and
 // says so, rather than being left to be found among the others.
@@ -1324,7 +1342,10 @@ async function handoff(target, mode, selected, delivery = 'clipboard') {
   // is what makes a return trip land in the original conversation instead of a
   // fresh one that has to be re-explained.
   const destination = mode === 'existing' ? await ledgerOriginChat(root, target) : undefined;
-  const prompt = handoffPrompt(target, mode, result.path, destination);
+  // A new chat is named after the one it continues, so pass on where this
+  // handoff came from.
+  const sourceChat = mode === 'new' ? await handoffSourceChat(root, source, resolved.session, selected) : undefined;
+  const prompt = handoffPrompt(target, mode, result.path, destination, sourceChat);
   await vscode.env.clipboard.writeText(prompt);
   await rememberLatest(root, target, result.path, prompt, destination);
   await publishHandoffState(root);
@@ -1515,12 +1536,21 @@ function chatLabel(chat) {
   return chat?.named && chat.title ? chat.title : undefined;
 }
 
-function handoffPrompt(target, mode, handoffPath, destination) {
+// The name a new chat should take: the source chat's own name, marked as the
+// handoff, so the two are found together in either app's sidebar.
+function handoffChatName(sourceChat) {
+  const named = chatLabel(sourceChat);
+  return named ? `${named} (handoff)` : undefined;
+}
+
+function handoffPrompt(target, mode, handoffPath, destination, sourceChat) {
   const sessionText = mode === 'new' ? 'Start a new session' : 'Continue in this existing session';
   const named = chatLabel(destination);
+  const newName = mode === 'new' ? handoffChatName(sourceChat) : undefined;
   return [
     `${sessionText} using this Turntrail handoff:`,
     ...(named && mode !== 'new' ? ['', `This is a continuation of the chat named "${named}".`] : []),
+    ...(newName ? ['', `This chat should be named "${newName}".`] : []),
     '',
     // Backticks keep the path literal. Real project paths contain spaces,
     // parentheses and backslashes, and a bare path gets mangled by agents that
@@ -1586,7 +1616,9 @@ const extensionApi = {
     await activateExtension(context);
     return extensionTestsEnabled() ? { __test: extensionApi.__test } : undefined;
   },
-  deactivate
+  deactivate,
+  // Pure and worth testing on its own: the words every handoff starts with.
+  handoffPrompt
 };
 
 function extensionTestsEnabled() {

@@ -276,6 +276,12 @@ Continue in this existing session using this Turntrail handoff:
 Read the handoff before acting...
 ```
 
+A handoff into a **new** chat also says what that chat should be called, so the two conversations
+sit together in either app's sidebar: the source chat's own name with "(handoff)" appended, for
+example `This chat should be named "sorted inference (handoff)".` The line is only added when the
+source chat was actually named by its agent or by you; a chat known only by its opening request is
+not worth naming a second chat after.
+
 Screenshot payloads embedded in native transcripts are not pasted into the handoff. Turntrail keeps local image paths when available and replaces inline base64 image blobs with compact omission markers.
 
 Gemini and Cursor are import sources in this release. Use their Discover or Import Latest commands,
