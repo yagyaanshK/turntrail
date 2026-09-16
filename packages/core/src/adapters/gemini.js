@@ -144,7 +144,7 @@ async function readGeminiConversation(filePath, options = {}) {
   let chars = 0;
   await readJsonlObjects(filePath, (record) => {
     if (!record || typeof record !== 'object') return;
-    if (record.type === 'parse_error') return;
+    if (record.type === 'parse_error' || record.type === 'oversized_line') return;
     if (typeof record.$rewindTo === 'string') {
       const at = order.indexOf(record.$rewindTo);
       const removed = at >= 0 ? order.splice(at) : order.splice(0);

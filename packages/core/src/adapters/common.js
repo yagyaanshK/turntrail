@@ -76,11 +76,27 @@ export function reportDiscoveryError(options, filePath, error) {
   options.onDiscoveryError?.({ path: filePath, error });
 }
 
+// How much of an oversized line is kept for the placeholder: enough to name the
+// native record type, never enough to matter for memory.
+const OVERSIZED_LINE_HEAD_CHARS = 512;
+
+// Stream a JSONL file one object at a time.
+//
+// A line longer than `maxLineChars` is never buffered whole. Codex writes a
+// `compacted` record on every context compaction that carries the entire
+// replacement history, and those lines grow past 8 MiB on long threads. They
+// carry nothing the adapters use, so failing the import over one would lose the
+// whole session. Instead the reader discards the line as it streams past and
+// emits an `oversized_line` placeholder so the adapter can record that a native
+// record was skipped, where, and what type it was.
 export async function readJsonlObjects(filePath, onObject, options = {}) {
   const maxLineChars = positiveLimit(options.maxLineChars, DEFAULT_MAX_JSONL_LINE_CHARS);
   const stream = createReadStream(filePath, { encoding: 'utf8', signal: options.signal });
   let lineNumber = 0;
   let pending = '';
+  // Set while the current line has already exceeded the limit and the rest of
+  // it is being discarded chunk by chunk until its newline arrives.
+  let skipping;
 
   const emit = async (line) => {
     lineNumber++;
@@ -99,6 +115,20 @@ export async function readJsonlObjects(filePath, onObject, options = {}) {
     return onObject(parsed, lineNumber);
   };
 
+  const emitOversized = async (head, chars) => {
+    lineNumber++;
+    return onObject(
+      {
+        type: 'oversized_line',
+        chars,
+        maxLineChars,
+        rawLine: head.slice(0, OVERSIZED_LINE_HEAD_CHARS),
+        rawLineClipped: true
+      },
+      lineNumber
+    );
+  };
+
   for await (const chunk of stream) {
     options.signal?.throwIfAborted();
     pending += chunk;
@@ -106,15 +136,36 @@ export async function readJsonlObjects(filePath, onObject, options = {}) {
     while ((newline = pending.indexOf('\n')) >= 0) {
       const line = pending.slice(0, newline).replace(/\r$/, '');
       pending = pending.slice(newline + 1);
-      if (line.length > maxLineChars) throw new Error(`JSONL line ${lineNumber + 1} exceeds the ${maxLineChars}-character safety limit.`);
-      if ((await emit(line)) === false) {
+      let outcome;
+      if (skipping) {
+        outcome = await emitOversized(skipping.head, skipping.chars + line.length);
+        skipping = undefined;
+      } else if (line.length > maxLineChars) {
+        outcome = await emitOversized(line, line.length);
+      } else {
+        outcome = await emit(line);
+      }
+      if (outcome === false) {
         stream.destroy();
         return;
       }
     }
-    if (pending.length > maxLineChars) throw new Error(`JSONL line ${lineNumber + 1} exceeds the ${maxLineChars}-character safety limit.`);
+    if (skipping) {
+      skipping.chars += pending.length;
+      pending = '';
+    } else if (pending.length > maxLineChars) {
+      skipping = { head: pending.slice(0, OVERSIZED_LINE_HEAD_CHARS), chars: pending.length };
+      pending = '';
+    }
   }
-  if (pending) await emit(pending.replace(/\r$/, ''));
+  if (skipping) await emitOversized(skipping.head, skipping.chars + pending.length);
+  else if (pending) await emit(pending.replace(/\r$/, ''));
+}
+
+// Best-effort name of the native record type on a line that was never parsed.
+export function oversizedLineSummary(event) {
+  const type = /"type"\s*:\s*"([^"]{1,64})"/.exec(String(event.rawLine || ''))?.[1];
+  return `Skipped oversized native record${type ? ` (${type})` : ''}: ${event.chars} characters exceed the ${event.maxLineChars}-character limit.`;
 }
 
 export async function readFirstJsonlObjects(filePath, limit = 80, options = {}) {

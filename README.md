@@ -147,7 +147,7 @@ A raw multi-tool session can be megabytes. Turntrail shrinks the **export** dete
 
 The ledger header of every export reports exactly what was collapsed and truncated.
 
-JSONL sources are streamed rather than loaded as one string. Discovery, individual lines, imported turn counts, and the ledger window used by one export have explicit safety limits with actionable errors instead of consuming unbounded extension-host memory. VS Code discovery/import/handoff notifications are cancellable. If the newest user request alone is larger than the export budget, Turntrail includes a head-and-tail truncation of that request rather than dropping it behind assistant output.
+JSONL sources are streamed rather than loaded as one string. Discovery, imported turn counts, and the ledger window used by one export have explicit safety limits with actionable errors instead of consuming unbounded extension-host memory. An individual record larger than 8 MiB (Codex writes one on every context compaction of a long thread) is skipped as it streams past and recorded as a one-line system turn naming the line and record type, so a single oversized line never fails the import. VS Code discovery/import/handoff notifications are cancellable. If the newest user request alone is larger than the export budget, Turntrail includes a head-and-tail truncation of that request rather than dropping it behind assistant output.
 
 ---
 

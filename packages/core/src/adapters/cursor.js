@@ -82,7 +82,7 @@ export async function importCursorSession(root, session, options = {}) {
 }
 
 export function cursorRecordToTurn(record, session, lineNumber) {
-  if (!record || typeof record !== 'object' || record.type === 'parse_error') return null;
+  if (!record || typeof record !== 'object' || record.type === 'parse_error' || record.type === 'oversized_line') return null;
   const content = cursorRecordText(record);
   if (!content.trim()) return null;
   const nativeRole = cursorRole(record);

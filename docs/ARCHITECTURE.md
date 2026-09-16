@@ -207,7 +207,7 @@ handoff, an attachment is removed only if no retained export references its hash
 validate the hash, enforce a byte ceiling, and resolve the path inside the ledger attachment
 directory. Raw, unredacted transcript content is never copied into an attachment.
 
-JSONL parsing is streaming and line-bounded. Discovery retains a bounded newest candidate set, and import/export enforce explicit turn and content ceilings. These limits bound memory without modifying the native source or the complete sessions already stored in the ledger; callers can deliberately raise them for unusually large workspaces. Core loops accept an abort signal, which the VS Code progress notification wires to its Cancel action.
+JSONL parsing is streaming and line-bounded. A line over the per-line limit is discarded chunk by chunk rather than buffered, and the reader emits an `oversized_line` placeholder carrying only a short head of the line; adapters turn it into a system turn that names the line number, size, and native record type. Discovery retains a bounded newest candidate set, and import/export enforce explicit turn and content ceilings. These limits bound memory without modifying the native source or the complete sessions already stored in the ledger; callers can deliberately raise them for unusually large workspaces. Core loops accept an abort signal, which the VS Code progress notification wires to its Cancel action.
 
 Inline media handling:
 

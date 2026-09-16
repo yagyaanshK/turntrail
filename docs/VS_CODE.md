@@ -69,8 +69,10 @@ local ledger rather than dumping raw JSONL or inline base64 image data.
 
 The webview receives opaque row ids and display metadata only. Native transcript paths and import
 descriptors remain in the trusted extension host and are resolved only after a button click. An
-unreadable or oversized individual transcript is skipped and reported without hiding healthy
-sessions from the same provider.
+unreadable individual transcript is skipped and reported without hiding healthy sessions from the
+same provider. An oversized individual record inside a transcript (such as a Codex compaction
+record on a long thread) is skipped and noted in the imported session rather than failing the
+import.
 
 Gemini and Cursor are currently source providers. Their sessions can be imported, viewed, and handed
 off to Claude or Codex, but Turntrail does not yet open or inject prompts into Gemini or Cursor.

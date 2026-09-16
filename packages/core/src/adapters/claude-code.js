@@ -6,6 +6,7 @@ import {
   homePath,
   jsonlFileInfo,
   listJsonlFiles,
+  oversizedLineSummary,
   pathsOverlap,
   readFirstJsonlObjects,
   readJsonlObjects,
@@ -118,6 +119,7 @@ function claudeContent(event) {
   if (event.aiTitle) return `Title: ${event.aiTitle}`;
   if (event.operation) return `Queue operation: ${event.operation}`;
   if (event.type === 'parse_error') return `Parse error: ${event.error}\n${event.rawLine}`;
+  if (event.type === 'oversized_line') return oversizedLineSummary(event);
   return '';
 }
 

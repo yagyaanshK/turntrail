@@ -6,6 +6,7 @@ import {
   homePath,
   jsonlFileInfo,
   listJsonlFiles,
+  oversizedLineSummary,
   pathsOverlap,
   readFirstJsonlObjects,
   readJsonlObjects,
@@ -179,12 +180,28 @@ function codexEventContent(event) {
     return { role: 'tool', content: contentToText(payload.output || payload.content || payload), stream: ITEM_STREAM };
   }
 
+  // Codex records built-in tools such as `apply_patch` as custom tool calls:
+  // the same pair of records as a function call, with `input` in place of
+  // `arguments`. Without these the ledger sees the edits' outcomes but never
+  // the edits themselves.
+  if (event.type === 'response_item' && payload.type === 'custom_tool_call') {
+    return { role: 'tool', content: `Tool call: ${payload.name}\n${contentToText(payload.input)}`, stream: ITEM_STREAM };
+  }
+
+  if (event.type === 'response_item' && payload.type === 'custom_tool_call_output') {
+    return { role: 'tool', content: contentToText(payload.output || payload.content || payload), stream: ITEM_STREAM };
+  }
+
   if (event.type === 'turn_context') {
     return { role: 'system', content: `Turn context:\n${JSON.stringify(payload, null, 2)}`, stream: META_STREAM };
   }
 
   if (event.type === 'parse_error') {
     return { role: 'system', content: `Parse error: ${event.error}\n${event.rawLine}`, stream: META_STREAM };
+  }
+
+  if (event.type === 'oversized_line') {
+    return { role: 'system', content: oversizedLineSummary(event), stream: META_STREAM };
   }
 
   return null;

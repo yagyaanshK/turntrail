@@ -12,7 +12,7 @@ import {
   selectPreparedTurns,
   writeSession
 } from '../src/index.js';
-import { readJsonlObjects } from '../src/adapters/common.js';
+import { oversizedLineSummary, readJsonlObjects } from '../src/adapters/common.js';
 
 async function tempRoot(prefix = 'context-bridge-scale-') {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -36,16 +36,40 @@ test('an oversized latest user request is truncated into the budget instead of d
   assert.equal(impossiblySmall.prepared.some((item) => item.role === 'user'), true, 'intent wins even when header overhead exceeds the budget');
 });
 
-test('JSONL reading bounds an individual line before invoking the callback', async () => {
+test('JSONL reading skips an oversized line and reports it instead of failing the file', async () => {
   const root = await tempRoot();
   const source = path.join(root, 'huge.jsonl');
-  await fs.writeFile(source, `${'x'.repeat(1000)}\n`, 'utf8');
-  let called = 0;
-  await assert.rejects(
-    () => readJsonlObjects(source, () => called++, { maxLineChars: 100 }),
-    /exceeds the 100-character safety limit/
-  );
-  assert.equal(called, 0);
+  const huge = `{"type":"compacted","payload":"${'x'.repeat(1000)}"}`;
+  await fs.writeFile(source, `${JSON.stringify({ n: 1 })}\n${huge}\n${JSON.stringify({ n: 3 })}\n`, 'utf8');
+  const seen = [];
+  await readJsonlObjects(source, (object, lineNumber) => seen.push({ object, lineNumber }), { maxLineChars: 100 });
+
+  assert.deepEqual(seen.map((item) => item.lineNumber), [1, 2, 3]);
+  assert.deepEqual(seen[0].object, { n: 1 });
+  assert.deepEqual(seen[2].object, { n: 3 });
+  const skipped = seen[1].object;
+  assert.equal(skipped.type, 'oversized_line');
+  assert.equal(skipped.chars, huge.length);
+  assert.equal(skipped.maxLineChars, 100);
+  assert.ok(skipped.rawLine.length <= 512, 'only a short head of the line is retained');
+  assert.match(skipped.rawLine, /"type":"compacted"/);
+  assert.match(oversizedLineSummary(skipped), /Skipped oversized native record \(compacted\): \d+ characters exceed the 100-character limit/);
+});
+
+test('JSONL reading discards an oversized line that spans many stream chunks', async () => {
+  const root = await tempRoot();
+  const source = path.join(root, 'huge-tail.jsonl');
+  // Larger than one 64 KiB read chunk, and without a trailing newline so the
+  // end-of-file path is exercised too.
+  const huge = `{"type":"compacted","payload":"${'y'.repeat(300000)}"}`;
+  await fs.writeFile(source, `${JSON.stringify({ n: 1 })}\n${huge}`, 'utf8');
+  const seen = [];
+  await readJsonlObjects(source, (object, lineNumber) => seen.push({ object, lineNumber }), { maxLineChars: 1000 });
+
+  assert.deepEqual(seen.map((item) => item.lineNumber), [1, 2]);
+  assert.equal(seen[1].object.type, 'oversized_line');
+  assert.equal(seen[1].object.chars, huge.length);
+  assert.match(seen[1].object.rawLine, /^\{"type":"compacted"/);
 });
 
 test('JSONL callback failures propagate once and are not retried as parse errors', async () => {

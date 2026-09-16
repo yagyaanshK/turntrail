@@ -155,13 +155,15 @@ test('one unreadable Claude transcript does not hide healthy sessions', async ()
     timestamp: '2026-09-04T00:00:00.000Z',
     message: { role: 'user', content: 'Healthy request' }
   }) + '\n', 'utf8');
-  await fs.writeFile(invalid, `${JSON.stringify({ type: 'user', message: { content: 'x'.repeat(512) } })}\n`, 'utf8');
+  // A cwd containing a NUL byte cannot be resolved on any platform, so this
+  // transcript fails while its metadata is inspected rather than while it is
+  // read: an oversized line no longer makes a transcript unreadable.
+  await fs.writeFile(invalid, `${JSON.stringify({ type: 'user', cwd: `${root} broken`, message: { content: 'x' } })}\n`, 'utf8');
   const skipped = [];
 
   const sessions = await discoverNativeSessions('claude', {
     root,
     projectsDir,
-    maxLineChars: 256,
     onDiscoveryError: (details) => skipped.push(details)
   });
   assert.equal(sessions.length, 1);
