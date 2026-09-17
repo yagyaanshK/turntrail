@@ -8,6 +8,8 @@ import {
   listJsonlFiles,
   oversizedLineSummary,
   pathsOverlap,
+  cachedDiscovery,
+  importSignature,
   readFirstJsonlObjects,
   readJsonlObjects,
   readLastJsonlObjects,
@@ -61,16 +63,19 @@ export async function discoverCodexSessions(options = {}) {
   for (const file of files.slice(0, options.limit || 300)) {
     options.signal?.throwIfAborted();
     try {
-      const meta = await inspectCodexFile(file.path, options);
-      const matchesProject = meta.cwd ? await pathsOverlap(meta.cwd, root) : false;
+      const { meta, matchesProject, latest } = await cachedDiscovery(options, file, root, async () => {
+        const meta = await inspectCodexFile(file.path, options);
+        const matchesProject = meta.cwd ? await pathsOverlap(meta.cwd, root) : false;
+        // Only sessions that could actually be offered as a choice get the extra
+        // tail read. Scanning every transcript on the machine for this would cost
+        // hundreds of reads to decorate rows nobody is choosing between.
+        // The tail is authoritative, but a transcript whose last megabytes are one
+        // enormous line yields nothing parseable. The head already holds several
+        // messages, so fall back to the latest of those before giving up.
+        const latest = matchesProject ? (await latestCodexRequest(file.path, options)) || meta.last : undefined;
+        return { meta, matchesProject, latest };
+      });
       if (!options.all && !matchesProject) continue;
-      // Only sessions that could actually be offered as a choice get the extra
-      // tail read. Scanning every transcript on the machine for this would cost
-      // hundreds of reads to decorate rows nobody is choosing between.
-      // The tail is authoritative, but a transcript whose last megabytes are one
-      // enormous line yields nothing parseable. The head already holds several
-      // messages, so fall back to the latest of those before giving up.
-      const latest = matchesProject ? (await latestCodexRequest(file.path, options)) || meta.last : undefined;
       const sessionId = meta.sessionId || sessionIdFromCodexPath(file.path);
       // Codex's own name for the thread when it has one - the same text the app
       // sidebar shows. Sessions it never named, such as forks and subagent runs,
@@ -107,7 +112,7 @@ export async function importCodexSession(root, session, options = {}) {
   await readJsonlObjects(session.path, (event, lineNumber) => {
     const turn = codexEventToTurn(event, session, lineNumber);
     collector.push(turn);
-  }, options);
+  }, { ...options, lineFilter: codexLineWanted });
   const { turns } = collector;
   if (turns.length === 0) throw new Error(`No importable Codex turns found in ${session.path}`);
   const collapsed = collapseCodexStreamDuplicates(turns);
@@ -116,10 +121,28 @@ export async function importCodexSession(root, session, options = {}) {
     surface: session.surface || 'cli',
     sessionId: `native-codex-${session.sessionId}`,
     sourcePath: session.path,
+    sourceSize: session.size,
+    sourceMtimeMs: session.mtimeMs,
+    importSignature: importSignature(options),
     nativeSessionId: session.sessionId,
     title: session.title,
     named: session.named
   });
+}
+
+// Records the adapter never turns into a turn, recognised from the first
+// characters of the line so they are never parsed. On a 1.3 GB thread they
+// were most of the bytes: every compaction record, the per-item completion
+// events that duplicate the items, token counts and reasoning. A record type
+// not listed here is parsed and judged as before, so a new one costs time,
+// not content.
+const CODEX_UNUSED_RECORD = /"type":"(?:compacted|world_state|token_usage_record)"/;
+const CODEX_UNUSED_EVENT = /"type":"event_msg","payload":\{"type":"(?:item_completed|item_started|token_count|thread_settings_applied|task_started|turn_aborted)"/;
+const CODEX_UNUSED_ITEM = /"type":"response_item","payload":\{"type":"(?:reasoning|web_search_call|tool_search_call|tool_search_output)"/;
+
+export function codexLineWanted(line) {
+  const head = line.slice(0, 240);
+  return !(CODEX_UNUSED_RECORD.test(head) || CODEX_UNUSED_EVENT.test(head) || CODEX_UNUSED_ITEM.test(head));
 }
 
 export function codexEventToTurn(event, session, lineNumber) {

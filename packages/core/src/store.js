@@ -14,7 +14,8 @@ import {
   validatePathSegment,
   withFileLock,
   writeFileAtomic,
-  writeJson
+  writeJson,
+  writeLinesAtomic
 } from './fs-utils.js';
 
 export async function initStore(root, options = {}) {
@@ -84,8 +85,9 @@ export async function writeSession(root, turns, options = {}) {
   const fileName = `${sessionId}.jsonl`;
   const relativePath = path.join('sessions', fileName).replaceAll('\\', '/');
   const absolutePath = resolveInside(path.join(resolveLedger(root), 'sessions'), fileName);
-  const content = turns.map((turn) => JSON.stringify({ ...turn, sessionId: turn.sessionId || sessionId })).join('\n') + '\n';
-  await writeFileAtomic(absolutePath, content);
+  await writeLinesAtomic(absolutePath, (function* lines() {
+    for (const turn of turns) yield JSON.stringify({ ...turn, sessionId: turn.sessionId || sessionId });
+  })());
   await addManifestEntry(root, 'sessions', {
     id: sessionId,
     provider,
@@ -94,6 +96,11 @@ export async function writeSession(root, turns, options = {}) {
     turnCount: turns.length,
     importedAt: new Date().toISOString(),
     sourcePath: options.sourcePath,
+    // The native file's size and mtime at import, and which options shaped
+    // the import, so the same file can be recognised as already imported.
+    sourceSize: Number.isFinite(options.sourceSize) ? options.sourceSize : undefined,
+    sourceMtimeMs: Number.isFinite(options.sourceMtimeMs) ? options.sourceMtimeMs : undefined,
+    importSignature: options.importSignature || undefined,
     // Which chat in the agent's own app this came from, so a handoff can name
     // the one to return to rather than leaving you to find it.
     nativeSessionId: options.nativeSessionId,

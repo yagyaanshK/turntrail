@@ -1278,8 +1278,11 @@ function closeManagedSession(item = {}) {
 // Import only ingests into the ledger (it opens nothing), so confirm it
 // modally — a transient toast was easy to miss and felt like "nothing happened".
 async function reportImport(provider, result) {
+  const outcome = result.unchanged
+    ? `the ${provider} session has not changed since it was imported; the ledger already holds its ${result.turnCount} turns.`
+    : `imported ${result.turnCount} turns from ${provider} into the ledger.`;
   await vscode.window.showInformationMessage(
-    `Turntrail: imported ${result.turnCount} turns from ${provider} into the ledger. This only updated local Turntrail data; no handoff was created. Run "Turntrail: Handoff to Claude/Codex" separately when you want one.`,
+    `Turntrail: ${outcome} This only updated local Turntrail data; no handoff was created. Run "Turntrail: Handoff to Claude/Codex" separately when you want one.`,
     { modal: true },
     'OK'
   );
@@ -1538,6 +1541,12 @@ function chatLabel(chat) {
 
 // The name a new chat should take: the source chat's own name, marked as the
 // handoff, so the two are found together in either app's sidebar.
+// `.turntrail` or `.context-bridge`: the folder two levels above the export.
+function ledgerFolderOf(handoffPath) {
+  const folder = path.basename(path.dirname(path.dirname(String(handoffPath || ''))));
+  return folder.startsWith('.') ? folder : '.turntrail';
+}
+
 function handoffChatName(sourceChat) {
   const named = chatLabel(sourceChat);
   return named ? `${named} (handoff)` : undefined;
@@ -1563,7 +1572,10 @@ function handoffPrompt(target, mode, handoffPath, destination, sourceChat) {
     // implies: whether the ledger is part of the repository, and what the
     // new session is actually for.
     'Before doing anything else:',
-    '1. Check whether `.turntrail/` is already tracked or ignored in this repository\'s git history. If it is neither, ask the user whether to commit it or add it to `.gitignore`; do not decide for them.',
+    // The ledger folder is named from the handoff path: a workspace made
+    // before the rename still keeps it under .context-bridge/, and an agent
+    // told to look for .turntrail/ would report it missing and ask anyway.
+    `1. This workspace's ledger is the \`${ledgerFolderOf(handoffPath)}/\` folder this handoff is in. If git already tracks or ignores it, or this is not a git repository, say nothing about it. Only if it exists and is neither tracked nor ignored, ask the user whether to commit it or add it to \`.gitignore\`; do not decide for them.`,
     '2. Do not start on the task the transcript implies. Once you have the project context, ask the user whether to continue where the source chat left off or whether there is a new standing instruction to follow, and wait for the answer.'
   ].join('\n');
 }

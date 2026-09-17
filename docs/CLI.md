@@ -80,6 +80,11 @@ beside a session are left out of `discover` and `import-native --last` unless
 `--include-subagents` is given, which lists each under the name its parent gave it and with a
 session id of its own.
 
+An import re-reads the whole native file, which for a long thread takes a minute. The manifest
+records the file's size and modification time at import, so `import-native` on a file that has
+not changed since, with the same options, reports the existing ledger session instead of reading
+it again. `--force` imports regardless.
+
 When a Claude Code session launched background agents, importing it splices each agent's final
 report in right after the turn that launched it, so the handoff carries what the agents found.
 `import-native --subagent-transcripts` splices the agents' whole recordings instead.

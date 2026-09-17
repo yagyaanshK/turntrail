@@ -46,7 +46,7 @@ test('every handoff prompt leaves two decisions to the user', () => {
   for (const mode of ['new', 'existing']) {
     const prompt = handoffPrompt('claude', mode, HANDOFF, { title: 'x', named: true }, { title: 'y', named: true });
     const tail = prompt.slice(prompt.indexOf('Before doing anything else:'));
-    assert.match(tail, /^Before doing anything else:\n1\. Check whether `\.turntrail\/` is already tracked or ignored in this repository's git history\. If it is neither, ask the user whether to commit it or add it to `\.gitignore`/);
+    assert.match(tail, /^Before doing anything else:\n1\. This workspace's ledger is the `\.turntrail\/` folder this handoff is in\. If git already tracks or ignores it, or this is not a git repository, say nothing about it\. Only if it exists and is neither tracked nor ignored, ask the user whether to commit it or add it to `\.gitignore`/);
     assert.match(tail, /\n2\. Do not start on the task the transcript implies\. Once you have the project context, ask the user whether to continue where the source chat left off or whether there is a new standing instruction to follow, and wait for the answer\.$/);
     // The old closing clause told the agent to ask only in doubt, which is the
     // opposite of what item 2 says.
@@ -58,6 +58,15 @@ test('an unnamed source chat, whose title is only its opening request, names not
   const prompt = handoffPrompt('codex', 'new', HANDOFF, undefined, { title: 'fix the failing build please', named: false });
   assert.doesNotMatch(prompt, /should be named/);
   assert.doesNotMatch(handoffPrompt('codex', 'new', HANDOFF, undefined, undefined), /should be named/);
+});
+
+test('a workspace still on the old ledger folder is told its real name', () => {
+  // The agent in the screenshot looked for .turntrail/, found nothing, and
+  // asked anyway; the ledger there was .context-bridge/, already ignored.
+  const legacy = 'C:\\repo\\.context-bridge\\exports\\2026-09-17-to-claude.md';
+  const prompt = handoffPrompt('claude', 'new', legacy, undefined, undefined);
+  assert.match(prompt, /ledger is the `\.context-bridge\/` folder this handoff is in/);
+  assert.doesNotMatch(prompt, /`\.turntrail\/`/);
 });
 
 test('a handoff into an existing chat names the chat it continues, not a new one', () => {

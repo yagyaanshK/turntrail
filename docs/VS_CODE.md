@@ -277,9 +277,11 @@ Read the handoff before acting...
 ```
 
 Every prompt ends by leaving two decisions to the user rather than to whatever the transcript
-implies. The receiving agent is told to check whether `.turntrail/` is already tracked or ignored in
-the repository's git history and, if it is neither, to ask whether to commit it or add it to
-`.gitignore`; and not to start on the task the transcript implies but, once it has the project
+implies. The receiving agent is told which folder holds this workspace's ledger, `.turntrail/` or
+the older `.context-bridge/`, taken from the handoff path so an agent never goes looking for the
+wrong one; to say nothing when git already tracks or ignores it, or the workspace is not a
+repository; and only when it exists and is neither, to ask whether to commit it or add it to
+`.gitignore`. It is also told not to start on the task the transcript implies but, once it has the project
 context, to ask whether to continue where the source chat left off or whether there is a new
 standing instruction, and to wait for the answer. The handoff document's own rules say the same.
 

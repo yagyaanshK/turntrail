@@ -31,7 +31,7 @@ Usage:
   turntrail init [--cwd <path>]
   turntrail import --provider <name> [--surface <name>] <file> [--cwd <path>]
   turntrail discover --provider claude|codex|gemini|cursor [--all] [--include-subagents] [--cwd <path>]
-  turntrail import-native --provider claude|codex|gemini|cursor [--last|--session <id>] [--all] [--subagent-transcripts] [--cwd <path>]
+  turntrail import-native --provider claude|codex|gemini|cursor [--last|--session <id>] [--all] [--subagent-transcripts] [--force] [--cwd <path>]
   turntrail run claude|codex|gemini|cursor [-- <native args>] [--cwd <path>]
   turntrail snapshot [--cwd <path>]
   turntrail export --to <target> [--max-chars <n>] [--no-dedupe] [--since-last-export]
@@ -132,9 +132,14 @@ export async function runCli(argv, io = process, dependencies = {}) {
       sessionId: flags.session,
       includeArchived: Boolean(flags.includeArchived),
       includeSubagents: Boolean(flags.includeSubagents),
-      subagentTranscripts: Boolean(flags.subagentTranscripts)
+      subagentTranscripts: Boolean(flags.subagentTranscripts),
+      force: Boolean(flags.force)
     });
-    io.stdout.write(`Imported native session into ${result.relativePath} (${result.turnCount} turns)\n`);
+    io.stdout.write(
+      result.unchanged
+        ? `Native session unchanged since its last import; ${result.relativePath} already holds it (${result.turnCount} turns). Use --force to import again.\n`
+        : `Imported native session into ${result.relativePath} (${result.turnCount} turns)\n`
+    );
     return;
   }
 

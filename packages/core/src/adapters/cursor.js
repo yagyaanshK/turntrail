@@ -76,6 +76,8 @@ export async function importCursorSession(root, session, options = {}) {
     surface: session.surface || 'ide',
     sessionId: `native-cursor-${nativeId}`,
     sourcePath: session.path,
+    sourceSize: session.size,
+    sourceMtimeMs: session.mtimeMs,
     nativeSessionId: nativeId,
     title: session.title
   });

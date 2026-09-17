@@ -13,6 +13,9 @@ class SessionsStore {
     this.core = core;
     this.root = root;
     this.discoveryOptions = options.discoveryOptions;
+    // A refresh re-reads the head and tail of every transcript on the machine.
+    // Files that have not changed are answered from here instead.
+    this.discoveryCache = new Map();
     this.rows = new Map();
     this.all = false;
     this.loading = false;
@@ -38,6 +41,7 @@ class SessionsStore {
       const result = await listSessionIndex(root, {
         all: this.all,
         signal: options.signal,
+        discoveryCache: this.discoveryCache,
         discoveryOptions: discoveryOptions || {}
       });
       if (generation !== this.generation) return this.viewModel();

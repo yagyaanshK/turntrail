@@ -9,6 +9,8 @@ import {
   listJsonlFiles,
   oversizedLineSummary,
   pathsOverlap,
+  cachedDiscovery,
+  importSignature,
   readFirstJsonlObjects,
   readJsonlObjects,
   readLastJsonlObjects,
@@ -52,12 +54,14 @@ export async function discoverClaudeSessions(options = {}) {
       // request. Naming the file directly is a request.
       if (agentId && !options.includeSubagents && !options.path) continue;
 
-      const meta = await inspectClaudeFile(file.path, options);
-      const matchesProject = meta.cwd ? await pathsOverlap(meta.cwd, root) : false;
+      const { meta, matchesProject, latest } = await cachedDiscovery(options, file, root, async () => {
+        const meta = await inspectClaudeFile(file.path, options);
+        const matchesProject = meta.cwd ? await pathsOverlap(meta.cwd, root) : false;
+        // Only sessions that could be offered as a choice get the extra tail read.
+        const latest = matchesProject ? (await latestClaudeRequest(file.path, options)) || meta.last : undefined;
+        return { meta, matchesProject, latest };
+      });
       if (!options.all && !matchesProject) continue;
-
-      // Only sessions that could be offered as a choice get the extra tail read.
-      const latest = matchesProject ? (await latestClaudeRequest(file.path, options)) || meta.last : undefined;
       const agent = agentId ? await describeSubagent(file.path, agentId, meta) : undefined;
       const title = agent?.description || meta.title || meta.first;
       const named = Boolean(agent?.description || meta.title);
@@ -113,6 +117,9 @@ export async function importClaudeSession(root, session, options = {}) {
     surface: 'cli',
     sessionId: ledgerSessionId,
     sourcePath: session.path,
+    sourceSize: session.size,
+    sourceMtimeMs: session.mtimeMs,
+    importSignature: importSignature(options),
     nativeSessionId: session.subagent ? session.parentSessionId : session.sessionId,
     title: session.title,
     named: session.named

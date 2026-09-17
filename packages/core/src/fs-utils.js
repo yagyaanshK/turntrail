@@ -67,6 +67,35 @@ export async function writeJson(filePath, value) {
   await writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+// Like writeFileAtomic, for content produced one line at a time. A large
+// session is written in 1 MB pieces instead of being joined into one string
+// first, which on a 17,000-turn import was an extra 90 MB held in memory.
+export async function writeLinesAtomic(filePath, lines, options = {}) {
+  const target = path.resolve(filePath);
+  await ensureDir(path.dirname(target));
+  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
+  let handle;
+  try {
+    handle = await fs.open(temporary, 'wx', options.mode ?? 0o600);
+    let buffer = '';
+    for (const line of lines) {
+      buffer += `${line}\n`;
+      if (buffer.length >= 1024 * 1024) {
+        await handle.write(buffer, null, 'utf8');
+        buffer = '';
+      }
+    }
+    if (buffer) await handle.write(buffer, null, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await fs.rename(temporary, target);
+  } finally {
+    await handle?.close().catch(() => {});
+    await fs.rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
 export async function writeFileAtomic(filePath, content, options = {}) {
   const target = path.resolve(filePath);
   await ensureDir(path.dirname(target));

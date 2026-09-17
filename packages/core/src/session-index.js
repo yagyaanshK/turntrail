@@ -35,6 +35,7 @@ export async function listSessionIndex(root, options = {}) {
             includeArchived: true,
             limit: options.perProviderLimit || DEFAULT_SESSION_INDEX_LIMIT,
             signal: options.signal,
+            discoveryCache: options.discoveryCache,
             ...baseDiscoveryOptions,
             ...location,
             onDiscoveryError(details) {

@@ -84,6 +84,8 @@ export async function importGeminiSession(root, session, options = {}) {
     surface: 'cli',
     sessionId: `native-gemini-${nativeId}`,
     sourcePath: session.path,
+    sourceSize: session.size,
+    sourceMtimeMs: session.mtimeMs,
     nativeSessionId: nativeId,
     title: session.title
   });

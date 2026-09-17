@@ -223,6 +223,18 @@ directory. Raw, unredacted transcript content is never copied into an attachment
 
 JSONL parsing is streaming and line-bounded. A line over the per-line limit is discarded chunk by chunk rather than buffered, and the reader emits an `oversized_line` placeholder carrying only a short head of the line; adapters turn it into a system turn that names the line number, size, and native record type. Discovery retains a bounded newest candidate set, and import/export enforce explicit turn and content ceilings. These limits bound memory without modifying the native source or the complete sessions already stored in the ledger; callers can deliberately raise them for unusually large workspaces. Core loops accept an abort signal, which the VS Code progress notification wires to its Cancel action.
 
+Four things keep the common operations fast on large stores. The reader assembles a line from
+its stream chunks in an array and joins it once at the newline, rather than appending each chunk
+to a growing string, which on an 8 MB record re-copied the whole line per chunk. An adapter can
+hand the reader a `lineFilter` that judges a record from the first characters of its line, so
+records it never uses (Codex compaction, per-item completion events, token counts, reasoning) are
+never parsed; on a 1.3 GB thread those were most of the bytes. Discovery accepts a
+`discoveryCache` map keyed by path, size and mtime, which the VS Code sessions panel keeps
+between refreshes so only changed files are read again. And the manifest records each import's
+source size, mtime and options, so `importNativeSession` on an unchanged file returns the
+existing ledger session (`unchanged: true`) instead of reading it again; `force` overrides.
+Session files are written a line at a time rather than as one joined string.
+
 Inline media handling:
 
 - local image paths are shown as references when available

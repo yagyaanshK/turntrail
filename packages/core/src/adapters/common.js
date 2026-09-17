@@ -87,6 +87,30 @@ export function reportDiscoveryError(options, filePath, error) {
   options.onDiscoveryError?.({ path: filePath, error });
 }
 
+// Discovery reads the head and tail of every candidate file on every refresh.
+// A caller that refreshes often passes a Map in `options.discoveryCache`, and
+// a file whose size and mtime have not changed is answered from it instead.
+const DISCOVERY_CACHE_LIMIT = 5000;
+
+export async function cachedDiscovery(options, file, root, probe) {
+  const cache = options.discoveryCache instanceof Map ? options.discoveryCache : undefined;
+  if (!cache) return probe();
+  const key = `${file.path}\0${file.size}\0${file.mtimeMs}\0${root}`;
+  if (cache.has(key)) return cache.get(key);
+  const value = await probe();
+  // Entries for files that have since grown are never read again; rather than
+  // track them, start over once the map is clearly mostly stale.
+  if (cache.size >= DISCOVERY_CACHE_LIMIT) cache.clear();
+  cache.set(key, value);
+  return value;
+}
+
+// Which import options change what a native file imports as. Recorded in the
+// manifest so an unchanged file is re-imported when the options differ.
+export function importSignature(options = {}) {
+  return options.subagentTranscripts ? 'subagent-transcripts' : '';
+}
+
 // How much of an oversized line is kept for the placeholder: enough to name the
 // native record type, never enough to matter for memory.
 const OVERSIZED_LINE_HEAD_CHARS = 512;
@@ -102,16 +126,26 @@ const OVERSIZED_LINE_HEAD_CHARS = 512;
 // record was skipped, where, and what type it was.
 export async function readJsonlObjects(filePath, onObject, options = {}) {
   const maxLineChars = positiveLimit(options.maxLineChars, DEFAULT_MAX_JSONL_LINE_CHARS);
+  const lineFilter = typeof options.lineFilter === 'function' ? options.lineFilter : undefined;
   const stream = createReadStream(filePath, { encoding: 'utf8', signal: options.signal });
   let lineNumber = 0;
-  let pending = '';
+  // The pieces of the line in progress, joined once when its newline arrives.
+  // Appending every chunk to one string instead re-copies all of it each time,
+  // which on an 8 MB line means copying gigabytes for a record that is then
+  // thrown away.
+  let parts = [];
+  let pendingChars = 0;
   // Set while the current line has already exceeded the limit and the rest of
   // it is being discarded chunk by chunk until its newline arrives.
   let skipping;
 
   const emit = async (line) => {
     lineNumber++;
+    if (line.endsWith('\r')) line = line.slice(0, -1);
     if (!line.trim()) return;
+    // A record the caller has no use for is not worth parsing. Most of a long
+    // Codex thread is such records, and parsing them is most of the cost.
+    if (lineFilter && lineFilter(line, lineNumber) === false) return;
     let parsed;
     try {
       parsed = JSON.parse(line);
@@ -140,37 +174,55 @@ export async function readJsonlObjects(filePath, onObject, options = {}) {
     );
   };
 
+  const pendingHead = () => {
+    let head = '';
+    for (const part of parts) {
+      head += part;
+      if (head.length >= OVERSIZED_LINE_HEAD_CHARS) break;
+    }
+    return head.slice(0, OVERSIZED_LINE_HEAD_CHARS);
+  };
+
   for await (const chunk of stream) {
     options.signal?.throwIfAborted();
-    pending += chunk;
-    let newline;
-    while ((newline = pending.indexOf('\n')) >= 0) {
-      const line = pending.slice(0, newline).replace(/\r$/, '');
-      pending = pending.slice(newline + 1);
+    let start = 0;
+    while (start < chunk.length) {
+      const newline = chunk.indexOf('\n', start);
+      if (newline < 0) break;
+      const piece = chunk.slice(start, newline);
+      start = newline + 1;
       let outcome;
       if (skipping) {
-        outcome = await emitOversized(skipping.head, skipping.chars + line.length);
+        outcome = await emitOversized(skipping.head, skipping.chars + piece.length);
         skipping = undefined;
-      } else if (line.length > maxLineChars) {
-        outcome = await emitOversized(line, line.length);
       } else {
-        outcome = await emit(line);
+        const line = parts.length > 0 ? parts.join('') + piece : piece;
+        parts = [];
+        pendingChars = 0;
+        outcome = line.length > maxLineChars ? await emitOversized(line, line.length) : await emit(line);
       }
       if (outcome === false) {
         stream.destroy();
         return;
       }
     }
-    if (skipping) {
-      skipping.chars += pending.length;
-      pending = '';
-    } else if (pending.length > maxLineChars) {
-      skipping = { head: pending.slice(0, OVERSIZED_LINE_HEAD_CHARS), chars: pending.length };
-      pending = '';
+    if (start < chunk.length) {
+      const rest = start === 0 ? chunk : chunk.slice(start);
+      if (skipping) {
+        skipping.chars += rest.length;
+      } else {
+        parts.push(rest);
+        pendingChars += rest.length;
+        if (pendingChars > maxLineChars) {
+          skipping = { head: pendingHead(), chars: pendingChars };
+          parts = [];
+          pendingChars = 0;
+        }
+      }
     }
   }
-  if (skipping) await emitOversized(skipping.head, skipping.chars + pending.length);
-  else if (pending) await emit(pending.replace(/\r$/, ''));
+  if (skipping) await emitOversized(skipping.head, skipping.chars);
+  else if (parts.length > 0) await emit(parts.join(''));
 }
 
 // Best-effort name of the native record type on a line that was never parsed.
