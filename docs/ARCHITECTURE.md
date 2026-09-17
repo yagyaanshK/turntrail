@@ -226,7 +226,11 @@ JSONL parsing is streaming and line-bounded. A line over the per-line limit is d
 Inline media handling:
 
 - local image paths are shown as references when available
-- inline `data:image/...;base64` payloads are replaced with compact omission markers
+- inline `data:image/...;base64` payloads are replaced with compact omission markers as each turn
+  is imported, wherever they appear, including inside tool-output strings that the adapters would
+  otherwise treat as text; the turn records how many were dropped in `metadata.inlineImagesOmitted`.
+  A browser-driven Codex thread of 1.3 GB, 85% screenshots, comes to 77 MB of text this way, which
+  is why the import ceiling is 128 MiB of text
 - long bare base64 blobs are replaced with compact omission markers
 - raw native transcript files remain referenced for auditability
 

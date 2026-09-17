@@ -1,6 +1,28 @@
 const INLINE_DATA_IMAGE_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\r\n]+/g;
-const QUOTED_DATA_IMAGE_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[^"`'\r\n]+/g;
+// A payload written into a URL or a JSON string: standard or URL-safe base64,
+// possibly percent-encoded, and nothing else. It used to run to the next
+// quote, which also ate whatever prose followed the image on that line, and
+// the result now lands in the ledger for good.
+const QUOTED_DATA_IMAGE_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=%_-]+/g;
 const JSON_BASE64_FIELD_RE = /(?:image|screenshot|data|bytes|base64)/i;
+
+// Inline image payloads are pixels, never text a receiving agent can use, and
+// a browser-driven session can carry a gigabyte of them inside tool outputs.
+// They are dropped the moment a turn is imported, so the ledger never stores
+// them and the in-memory import limit measures text, not screenshots.
+export function omitInlineImages(content) {
+  let omitted = 0;
+  let text = String(content || '');
+  text = text.replace(QUOTED_DATA_IMAGE_RE, (match) => {
+    omitted++;
+    return `[Turntrail omitted inline base64 image: ${match.length} chars]`;
+  });
+  text = text.replace(INLINE_DATA_IMAGE_RE, (match) => {
+    omitted++;
+    return `[Turntrail omitted inline base64 image: ${match.length} chars]`;
+  });
+  return { content: text, omitted };
+}
 
 export function sanitizeContentForHandoff(content) {
   const stats = {
@@ -10,15 +32,9 @@ export function sanitizeContentForHandoff(content) {
     secrets: 0
   };
 
-  let text = String(content || '');
-  text = text.replace(QUOTED_DATA_IMAGE_RE, (match) => {
-    stats.inlineImages++;
-    return `[Turntrail omitted inline base64 image: ${match.length} chars]`;
-  });
-  text = text.replace(INLINE_DATA_IMAGE_RE, (match) => {
-    stats.inlineImages++;
-    return `[Turntrail omitted inline base64 image: ${match.length} chars]`;
-  });
+  const images = omitInlineImages(content);
+  let text = images.content;
+  stats.inlineImages = images.omitted;
   text = replaceJsonBase64Fields(text, stats);
   text = replaceLongBase64Tokens(text, stats);
   const redacted = redactSecrets(text);

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createReadStream } from 'node:fs';
+import { omitInlineImages } from '../media.js';
 
 export function homePath(...parts) {
   return path.join(os.homedir(), ...parts);
@@ -11,7 +12,9 @@ export const DEFAULT_MAX_DISCOVERY_FILES = 5000;
 export const DEFAULT_MAX_DISCOVERY_ENTRIES = 50000;
 export const DEFAULT_MAX_JSONL_LINE_CHARS = 8 * 1024 * 1024;
 export const DEFAULT_MAX_IMPORTED_TURNS = 50000;
-export const DEFAULT_MAX_IMPORTED_CHARS = 64 * 1024 * 1024;
+// Measured after inline images are dropped, so this is text. A 1.3 GB
+// browser-driven Codex thread came to 77 MB of it.
+export const DEFAULT_MAX_IMPORTED_CHARS = 128 * 1024 * 1024;
 
 export async function listJsonlFiles(root, options = {}) {
   return listSessionFiles(root, { ...options, extensions: ['.jsonl'] });
@@ -59,6 +62,14 @@ export function createBoundedTurnCollector(options = {}) {
     push(turn) {
       options.signal?.throwIfAborted();
       if (!turn) return;
+      // Every adapter's turns pass through here, so this is where inline
+      // image payloads leave: the ledger stores text, and the limit below
+      // counts text.
+      const images = omitInlineImages(turn.content);
+      if (images.omitted > 0) {
+        turn.content = images.content;
+        turn.metadata = { ...(turn.metadata || {}), inlineImagesOmitted: images.omitted };
+      }
       chars += String(turn.content || '').length;
       if (turns.length + 1 > maxTurns || chars > maxChars) {
         throw new Error(

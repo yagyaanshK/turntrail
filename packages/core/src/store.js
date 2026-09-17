@@ -104,7 +104,9 @@ export async function writeSession(root, turns, options = {}) {
 }
 
 export const DEFAULT_MAX_LEDGER_TURNS = 50000;
-export const DEFAULT_MAX_LEDGER_CHARS = 64 * 1024 * 1024;
+// The same ceiling as an import: a ledger holds text, since inline images are
+// dropped on the way in, and one long browser-driven thread is 77 MB of it.
+export const DEFAULT_MAX_LEDGER_CHARS = 128 * 1024 * 1024;
 export const DEFAULT_SESSION_PREVIEW_TURNS = 1000;
 export const DEFAULT_SESSION_PREVIEW_CHARS = 2 * 1024 * 1024;
 
