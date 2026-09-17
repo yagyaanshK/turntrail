@@ -1542,9 +1542,12 @@ function chatLabel(chat) {
 // The name a new chat should take: the source chat's own name, marked as the
 // handoff, so the two are found together in either app's sidebar.
 // `.turntrail` or `.context-bridge`: the folder two levels above the export.
+// Split on either separator rather than through `path`, whose POSIX build
+// leaves a Windows path in one piece.
 function ledgerFolderOf(handoffPath) {
-  const folder = path.basename(path.dirname(path.dirname(String(handoffPath || ''))));
-  return folder.startsWith('.') ? folder : '.turntrail';
+  const parts = String(handoffPath || '').split(/[\\/]+/).filter(Boolean);
+  const folder = parts.length >= 3 ? parts[parts.length - 3] : '';
+  return folder.length > 1 && folder.startsWith('.') ? folder : '.turntrail';
 }
 
 function handoffChatName(sourceChat) {
