@@ -692,7 +692,8 @@ test('additional Codex limits remain separate from the main quota', () => {
   assert.deepEqual(usage.additionalLimits[0], {
     id: 'base_model_inference',
     name: 'gpt-reserve',
-    label: 'GPT Reserve',
+    label: 'Luna Reserve',
+    description: 'Fallback allowance for GPT-5.6 Luna',
     meteredFeature: 'base_model_inference',
     windows: [{
       key: 'primary_window',
@@ -719,7 +720,27 @@ test('unknown additional Codex limits retain their backend identity', () => {
   assert.equal(usage.windows.length, 1);
   assert.equal(usage.additionalLimits[0].id, 'future_feature');
   assert.equal(usage.additionalLimits[0].label, 'Future Pool');
+  assert.equal(usage.additionalLimits[0].description, 'Separate allowance');
   assert.equal(usage.additionalLimits[0].windows[0].remainingPercent, 75);
+});
+
+test('Codex-Spark limits retain the documented product name and separate allowance', () => {
+  const usage = normalizeCodexUsage({
+    rate_limit: { primary_window: { used_percent: 20, limit_window_seconds: 18000 } },
+    additional_rate_limits: [{
+      limit_name: 'gpt-5.3-codex-spark',
+      metered_feature: 'codex_bengalfox',
+      rate_limit: {
+        primary_window: { used_percent: 10, limit_window_seconds: 18000 },
+        secondary_window: { used_percent: 15, limit_window_seconds: 604800 }
+      }
+    }]
+  });
+
+  assert.equal(usage.windows.length, 1);
+  assert.equal(usage.additionalLimits[0].label, 'GPT-5.3-Codex-Spark');
+  assert.equal(usage.additionalLimits[0].description, 'Separate allowance for the real-time Codex-Spark model');
+  assert.deepEqual(usage.additionalLimits[0].windows.map((window) => window.label), ['5h', 'weekly']);
 });
 
 test('usage normalization ignores unrelated counters in the payload', () => {

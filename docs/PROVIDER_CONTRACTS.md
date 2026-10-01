@@ -35,3 +35,16 @@ fetch functions apply the strict boundary check.
 Do not test refresh flows with live tokens. Both providers rotate refresh tokens, so an exploratory request can
 invalidate the login used by an official client. Prefer delegating new sign-in integrations to the provider's
 official CLI whenever it exposes a non-interactive flow.
+
+## Candidate: native Codex OAuth
+
+The official open-source Codex client publishes enough implementation detail to reproduce its PKCE
+loopback and device-code flows without launching the CLI. This is technically viable and would
+remove the binary prerequisite from subscription sign-in. It is not a drop-in refactor: Turntrail
+would begin handling Codex authorization codes, access tokens, rotating refresh tokens, callback
+state, scopes, and credential serialization itself.
+
+Before implementing it, require synthetic tests for PKCE and state validation, loopback binding and
+expiry, single-use code exchange, cancellation, token-response validation, refresh-token rotation,
+atomic `auth.json` writes, rollback, and upstream contract drift. Keep the existing auth-file import
+as the no-network, CLI-free fallback.

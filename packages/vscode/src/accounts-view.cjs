@@ -170,6 +170,7 @@ class AccountsStore {
       additionalLimits: (hasAuthenticationIssue ? [] : (usage?.additionalLimits || [])).map((limit) => ({
         id: limit.id,
         label: limit.label,
+        description: limit.description,
         limitReached: Boolean(limit.limitReached),
         windows: (limit.windows || []).map((window) => ({
           label: window.label,
@@ -532,9 +533,9 @@ function html(webview) {
     margin-top: 10px; padding-top: 9px;
     border-top: 1px solid var(--hairline);
   }
-  .additional-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .additional-title { display: flex; flex-direction: column; gap: 2px; }
   .additional-title b { font-size: 0.88em; font-weight: 600; }
-  .additional-title span, .additional-status { color: var(--dim); font-size: 0.78em; }
+  .additional-title span, .additional-status { color: var(--dim); font-size: 0.78em; line-height: 1.35; }
   .additional-limit .meters { margin-top: 6px; }
   .reset-credits {
     display: flex; align-items: center; gap: 8px;
@@ -682,7 +683,7 @@ function renderAdditionalLimit(limit) {
   const meters = (limit.windows || []).map(renderMeter).join('');
   return '<div class="additional-limit">' +
     '<div class="additional-title"><b>' + esc(limit.label) + '</b>' +
-      '<span>Separate allowance</span></div>' +
+      '<span>' + esc(limit.description || 'Separate allowance') + '</span></div>' +
     (limit.limitReached ? '<div class="additional-status">Limit reached</div>' : '') +
     (meters ? '<div class="meters">' + meters + '</div>' : '<div class="additional-status">Quota unavailable</div>') +
   '</div>';

@@ -142,6 +142,12 @@ Codex cards show **banked resets** when OpenAI reports any, including the earlie
 account. The backend can decline with `nothing_to_reset`; Turntrail never uses a reset automatically
 or retries the redemption POST.
 
+OpenAI may also return `additional_rate_limits` for independent model pools. These render below the
+normal Codex meters and never change the account headline. The documented `gpt-reserve` pool is
+shown as **Luna Reserve**, and a GPT-5.3-Codex-Spark pool is shown by that product name with its own
+five-hour and weekly windows when provided. Unrecognized pools retain a readable form of the
+backend name; Turntrail does not guess which model consumes them.
+
 | Action | Effect |
 |--------|--------|
 | **Use this** | Points that agent's official CLI and extension at this account (machine-wide). |
@@ -175,9 +181,17 @@ accounts do not use OAuth refresh tokens and are skipped.
 
 ### Signing in
 
-**Codex** delegates to the official binary: Turntrail spawns `codex login` with `CODEX_HOME`
-set and reads its output to render progress. It never performs the OAuth exchange. Methods: browser,
-device code, access token, API key, paste an existing `auth.json`.
+**Codex** delegates four sign-in methods to the official binary: browser, device code, access token,
+and API key all require `codex` on `PATH`. Turntrail spawns `codex login` with `CODEX_HOME` set and
+reads its output to render progress. It never performs the OAuth exchange. Pasting or choosing an
+existing `auth.json` is the current method that does not require the Codex CLI.
+
+A native CLI-free OAuth implementation is technically feasible: the official open-source Codex
+client exposes its PKCE loopback, device-code, token exchange, scopes, and credential persistence
+behavior. It is not implemented yet because it would move ownership of Codex tokens and an observed
+private authentication contract into Turntrail. That path needs the same explicit contract
+validation, callback hardening, cancellation, and credential tests already used for Claude before
+it can replace delegation to the official client.
 
 **Claude** cannot work that way. Its login is an Ink terminal UI needing raw mode on stdin, so a
 piped child process dies before printing anything, and `claude setup-token` writes no credential by

@@ -496,7 +496,7 @@ function codexCards() {
     <section class="card" data-method="browser">
       <button class="method primary" data-open="browser">
         <span class="glyph">↗</span>
-        <span><b>Sign in with ChatGPT</b><span>Opens your browser and waits for you to finish</span></span>
+        <span><b>Sign in with ChatGPT</b><span>Requires Codex CLI; opens your browser</span></span>
         <span class="chev">▾</span>
       </button>
       <div class="body" hidden>
@@ -516,7 +516,7 @@ function codexCards() {
     <section class="card" data-method="device">
       <button class="method" data-open="device">
         <span class="glyph">⌗</span>
-        <span><b>Use a device code</b><span>For remote or headless machines, or a different device</span></span>
+        <span><b>Use a device code</b><span>Requires Codex CLI; for remote or headless machines</span></span>
         <span class="chev">▾</span>
       </button>
       <div class="body" hidden>
@@ -542,7 +542,7 @@ function codexCards() {
     <section class="card" data-method="token">
       <button class="method" data-open="token">
         <span class="glyph">⛨</span>
-        <span><b>Use an access token</b><span>Paste a Codex access token, no browser or local port</span></span>
+        <span><b>Use an access token</b><span>Requires Codex CLI; no browser or local port</span></span>
         <span class="chev">▾</span>
       </button>
       <div class="body" hidden>
@@ -565,7 +565,7 @@ function codexCards() {
     <section class="card" data-method="apikey">
       <button class="method" data-open="apikey">
         <span class="glyph">⚿</span>
-        <span><b>Use an API key</b><span>Billed per token, not against a subscription</span></span>
+        <span><b>Use an API key</b><span>Requires Codex CLI; billed per token</span></span>
         <span class="chev">▾</span>
       </button>
       <div class="body" hidden>
@@ -586,7 +586,7 @@ function codexCards() {
     <section class="card" data-method="paste">
       <button class="method" data-open="paste">
         <span class="glyph">⇩</span>
-        <span><b>Paste an existing login</b><span>Bring an auth.json across from a machine that is already signed in</span></span>
+        <span><b>Paste an existing login</b><span>No Codex CLI required; import an existing auth.json</span></span>
         <span class="chev">▾</span>
       </button>
       <div class="body" hidden>
@@ -798,6 +798,20 @@ function html(webview, provider) {
     border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.28));
     background: var(--vscode-editorWidget-background);
   }
+  .prerequisite {
+    margin: 0; padding: 11px 13px; border-radius: 7px; line-height: 1.5;
+    border: 1px solid var(--vscode-editorInfo-foreground, var(--vscode-focusBorder));
+    background: var(--vscode-textBlockQuote-background, var(--vscode-editorWidget-background));
+    color: var(--vscode-foreground); font-size: 0.88rem;
+  }
+  .method-error {
+    margin: 0; padding: 10px 12px; border-radius: 6px; line-height: 1.5;
+    color: var(--vscode-errorForeground);
+    border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 55%, transparent);
+    background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
+  }
+  .method-error b { display: block; margin-bottom: 2px; }
+  .card.failed { border-color: var(--vscode-errorForeground); }
   .method.primary { background: ${claude ? '#d97757' : 'var(--vscode-button-background)'}; color: ${claude ? '#1a1a19' : 'var(--vscode-button-foreground)'}; border-color: transparent; }
   .method.primary .glyph { background: rgba(0,0,0,0.16); color: inherit; }
   .method b { display: block; font-weight: 600; }
@@ -842,6 +856,11 @@ function html(webview, provider) {
     <h1>${claude ? 'Connect a Claude account' : 'Connect a Codex subscription'}</h1>
     <p class="lede">${LEDE[claude ? 'claude' : 'codex']}</p>
   </div>
+
+  ${claude ? '' : `<p class="prerequisite"><b>Codex CLI required for sign-in.</b> Browser, device-code,
+    access-token, and API-key methods run the official <code>codex</code> command. Install it first with
+    <code>npm install -g @openai/codex</code> and ensure it is on PATH. Importing an existing
+    <code>auth.json</code> is the only method below that does not require the CLI.</p>`}
 
   <div class="field" id="nameField">
     <label for="label">Name this account</label>
@@ -945,7 +964,10 @@ function open(name) {
 }
 
 function reset(name) {
+  card(name).classList.remove('failed');
   const body = card(name).querySelector('.body');
+  const error = body.querySelector('[data-error]');
+  if (error) error.remove();
   body.querySelectorAll('[data-link], [data-code-block], [data-busy]').forEach((element) => { element.hidden = true; });
   const status = within(name, '.status');
   if (status && (!SECRET_INPUT[name] || TWO_STEP[name])) status.hidden = false;
@@ -1105,9 +1127,22 @@ window.addEventListener('message', (event) => {
     if (busy) busy.hidden = true;
     const retry = within(name, '[data-retry]');
     if (retry) retry.hidden = false;
-    const outcome = $('outcome');
-    outcome.hidden = false;
-    outcome.innerHTML = '<span class="error">Sign-in did not complete.</span><br>' + esc(data.message || '');
+    // Keep the failure beside the method that produced it. A page with five
+    // cards can put the global footer below the viewport, making a failed flow
+    // look as if it is still waiting.
+    const target = card(name);
+    target.classList.add('failed', 'open');
+    const body = target.querySelector('.body');
+    body.hidden = false;
+    let error = body.querySelector('[data-error]');
+    if (!error) {
+      error = document.createElement('p');
+      error.className = 'method-error';
+      error.dataset.error = '';
+      body.prepend(error);
+    }
+    error.innerHTML = '<b>Sign-in did not complete.</b>' + esc(data.message || '');
+    error.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' });
     return;
   }
 });

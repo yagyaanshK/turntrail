@@ -56,6 +56,7 @@ test('the accounts panel is told the maintenance state so it can show the switch
   });
   const { view, posted } = fakeView();
   await panel.resolveWebviewView(view);
+  assert.match(view.webview.html, /limit\.description \|\| 'Separate allowance'/);
   assert.deepEqual(posted.at(-1).model.maintenance, { enabled: false, intervalHours: 5 });
 
   enabled = true;

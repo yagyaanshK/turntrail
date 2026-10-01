@@ -153,6 +153,11 @@ Codex cards also show the number of **banked resets** available and the earliest
 provides detail rows. **Use reset** requires confirmation, consumes one reset, and then refreshes
 the account. It is never automatic, and the redemption POST is never retried.
 
+Additional model allowances stay in their own labelled section instead of being mixed into the
+ordinary Codex headline. Turntrail labels backend `gpt-reserve` as **Luna Reserve** (the GPT-5.6
+Luna fallback) and names **GPT-5.3-Codex-Spark** explicitly. Unknown future pools keep a readable
+version of OpenAI's supplied name and are described only as a separate allowance.
+
 
 Every account gets its own configuration directory under `~/.turntrail/accounts/` —
 `CODEX_HOME` for Codex, `CLAUDE_CONFIG_DIR` for Claude — so they all stay signed in
@@ -163,16 +168,18 @@ simultaneously and there is nothing to swap.
 Each method is a card that expands in place, so one that will not work can be abandoned without
 losing the others, and each has its own Retry.
 
-**Codex** methods drive the official `codex` binary as a background process. Turntrail reads
-its output to render progress but never performs the OAuth exchange and never holds a token.
+**Codex** browser, device-code, access-token, and API-key methods require the official `codex` CLI
+on `PATH`. Turntrail drives it as a background process and reads its output to render progress but
+never performs the OAuth exchange. Pasting or choosing an existing `auth.json` does not require the
+CLI.
 
 | Method | Local port | Notes |
 |--------|-----------|-------|
-| Sign in with ChatGPT | `localhost:1455` | The default. Cannot complete over SSH or in a container. |
-| Device code | none | Approve a short code from any device. A workspace admin can disable it. |
-| Access token | none | `--with-access-token`. Issued by workspace admins for trusted scripts and CI. |
-| API key | none | Billed per token at API rates, not against a subscription. |
-| Paste an existing login | none | Bring `auth.json` from a machine that is already signed in. |
+| Sign in with ChatGPT | `localhost:1455` | Requires Codex CLI. The default; cannot complete over SSH or in a container. |
+| Device code | none | Requires Codex CLI. Approve a short code from any device; an admin can disable it. |
+| Access token | none | Requires Codex CLI. `--with-access-token`, for trusted scripts and CI. |
+| API key | none | Requires Codex CLI. Billed per token at API rates, not against a subscription. |
+| Paste an existing login | none | No CLI required. Bring `auth.json` from a signed-in machine. |
 
 **Claude** works differently, and the difference is forced rather than chosen. Claude Code's login is
 an Ink terminal UI that requires raw mode on stdin, so a piped child process dies before printing

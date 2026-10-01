@@ -494,11 +494,13 @@ function readAdditionalLimits(payload) {
     const meteredFeature = firstString(item.metered_feature, item.meteredFeature, item.id);
     const windows = collectWindows(item.rate_limit ?? item.rateLimit);
     if (!name && !meteredFeature && windows.length === 0) return [];
+    const display = describeAdditionalLimit(name, meteredFeature, index);
 
     return [{
       id: meteredFeature || name || `additional-${index + 1}`,
       name: name || meteredFeature || `additional-${index + 1}`,
-      label: humanizeLimitName(name || meteredFeature || `Additional limit ${index + 1}`),
+      label: display.label,
+      description: display.description,
       meteredFeature,
       windows,
       ...readLimitState(item)
@@ -651,6 +653,24 @@ function humanizeLimitName(value) {
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase())
     .replace(/\b(Gpt|Api)\b/g, (word) => word.toUpperCase());
+}
+
+function describeAdditionalLimit(name, meteredFeature, index) {
+  const source = name || meteredFeature || `Additional limit ${index + 1}`;
+  const normalized = String(source).toLowerCase().replace(/_/g, '-');
+  if (normalized === 'gpt-reserve') {
+    return {
+      label: 'Luna Reserve',
+      description: 'Fallback allowance for GPT-5.6 Luna'
+    };
+  }
+  if (/^gpt-[a-z0-9.]+-codex-spark$/.test(normalized)) {
+    return {
+      label: normalized.replace(/^gpt-/, 'GPT-').replace('-codex-spark', '-Codex-Spark'),
+      description: 'Separate allowance for the real-time Codex-Spark model'
+    };
+  }
+  return { label: humanizeLimitName(source), description: 'Separate allowance' };
 }
 
 function clampPercent(value) {

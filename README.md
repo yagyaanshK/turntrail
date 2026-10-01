@@ -286,9 +286,10 @@ file sits *beside* the stock `~/.claude` home, at `~/.claude.json`, but moves *i
 Every method is a card in the sign-in panel that expands in place, so one that will not work can be
 abandoned without losing the others.
 
-**Codex** — Turntrail launches the **official** `codex` binary with `CODEX_HOME` set, reads its
-output to drive the progress display, and never performs the OAuth exchange or holds a token. Five
-methods: browser, device code, access token, API key, or pasting an existing `auth.json`.
+**Codex** — browser, device-code, access-token, and API-key sign-in require the **official Codex
+CLI** to be installed and available as `codex` on `PATH`. Turntrail launches that binary with
+`CODEX_HOME` set, reads its output to drive the progress display, and never performs the OAuth
+exchange. Pasting or choosing an existing `auth.json` is the current CLI-free method.
 
 **Claude** — this one is different, and the difference is forced rather than chosen. Claude Code's
 login is an Ink terminal UI that requires raw mode on stdin, so a piped child process dies before
@@ -325,6 +326,12 @@ details are available it shows the earliest expiry. **Use reset** asks for confi
 one reset through the same endpoint used by the official Codex client, and immediately refreshes
 that account's quota. Turntrail never redeems a reset automatically and never retries the
 account-changing request; after a timeout it tells you to refresh before trying again.
+
+OpenAI can also return independent model allowances. Turntrail renders these below the ordinary
+Codex meters instead of mixing them into the account headline. `gpt-reserve` is labelled **Luna
+Reserve**, the GPT-5.6 Luna fallback allowance; GPT-5.3-Codex-Spark is labelled by name and shown as
+its own real-time-model allowance. Unknown future pools retain a readable version of the provider's
+name and are described only as a separate allowance.
 Access tokens expire, and each official client normally renews only the account it is currently
 using. A quota read renews an inactive OAuth account only when its access-token expiry says renewal
 is due. While Claude is running, the official client owns its rotating refresh token and Turntrail
@@ -453,7 +460,7 @@ The export’s ledger header lists how many turns were collapsed or truncated, s
 
 ## Roadmap
 
-Claude accounts in the CLI · optional worktrees per session · agent status hooks and notifications ·
+Claude accounts in the CLI · native Codex OAuth without a CLI dependency · optional worktrees per session · agent status hooks and notifications ·
 context/token/cost measurements · more native adapters · MCP server exposing the ledger · encrypted
 team synchronization · cross-session conflict detection.
 

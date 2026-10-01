@@ -49,6 +49,23 @@ test('the login webview is discarded while hidden and clears submitted secrets',
   assert.match(createdPanel.webview.html, /clearSecrets\(\)/);
 });
 
+test('Codex sign-in explains its CLI dependency before a method starts', async () => {
+  const panel = new LoginPanel({}, async () => ({}), {});
+  await panel.open({ provider: 'codex', label: 'Test' });
+  assert.match(createdPanel.webview.html, /Codex CLI required for sign-in/);
+  assert.match(createdPanel.webview.html, /npm install -g @openai\/codex/);
+  assert.match(createdPanel.webview.html, /No Codex CLI required; import an existing auth\.json/);
+});
+
+test('sign-in failures render inside and reopen the originating method card', async () => {
+  const panel = new LoginPanel({}, async () => ({}), {});
+  await panel.open({ provider: 'codex', label: 'Test' });
+  assert.match(createdPanel.webview.html, /target\.classList\.add\('failed', 'open'\)/);
+  assert.match(createdPanel.webview.html, /body\.prepend\(error\)/);
+  assert.match(createdPanel.webview.html, /error\.scrollIntoView/);
+  assert.doesNotMatch(createdPanel.webview.html, /outcome\.innerHTML = '<span class="error">Sign-in did not complete/);
+});
+
 test('login operations are serialized and failed provisional accounts are rolled back', async () => {
   const removals = [];
   const panel = new LoginPanel(
