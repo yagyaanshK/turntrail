@@ -130,7 +130,7 @@ class LoginPanel {
     }
     if (message?.type === 'copy' && message.value) {
       await vscode.env.clipboard.writeText(message.value);
-      this.post({ type: 'copied' });
+      this.post({ type: 'copied', method: message.method, target: message.target });
       return;
     }
     if (message?.type === 'pickFile') {
@@ -503,7 +503,10 @@ function codexCards() {
         <div class="status"><span class="spinner"></span><span data-status>Starting…</span></div>
         <div data-link hidden>
           <p class="note">Your browser should have opened. If it did not, open the page yourself:</p>
-          <div class="row"><button class="action primary" data-verify>Open sign-in page</button></div>
+          <div class="row">
+            <button class="action primary" data-verify>Open sign-in page</button>
+            <button class="action" data-copy-link>Copy sign-in link</button>
+          </div>
           <p class="link" data-authlink></p>
         </div>
         <div class="row">
@@ -526,8 +529,11 @@ function codexCards() {
           <p class="note" data-hint></p>
           <div class="row">
             <button class="action primary" data-verify>Open the sign-in page</button>
+            <button class="action" data-copy-link>Copy sign-in link</button>
             <button class="action" data-copy>Copy code</button>
           </div>
+          <p class="note">This is an HTTPS link, not a localhost link. You can copy it to another
+            browser or trusted device for authorization.</p>
         </div>
         <p class="note">No local port is used, so this works over SSH or in a container, and the
           browser can be on any device. It has to be enabled in your ChatGPT security settings; on a
@@ -621,7 +627,10 @@ function claudeCards() {
         <div class="status"><span class="spinner"></span><span data-status>Starting…</span></div>
         <div data-link hidden>
           <p class="note">Approve access in the browser. This tab updates by itself when you are done.</p>
-          <div class="row"><button class="action primary" data-verify>Open sign-in page</button></div>
+          <div class="row">
+            <button class="action primary" data-verify>Open sign-in page</button>
+            <button class="action" data-copy-link>Copy sign-in link</button>
+          </div>
           <p class="link" data-authlink></p>
         </div>
         <div class="row">
@@ -636,19 +645,24 @@ function claudeCards() {
     <section class="card" data-method="code">
       <button class="method" data-open="code">
         <span class="glyph">⌗</span>
-        <span><b>Use an authorization code</b><span>No local port — approve anywhere, paste the code back</span></span>
+        <span><b>Paste code here if prompted</b><span>No local port; approve anywhere and paste the code shown</span></span>
         <span class="chev">▾</span>
       </button>
       <div class="body" hidden>
         <div class="status"><span class="spinner"></span><span data-status>Preparing a sign-in link…</span></div>
         <div data-link hidden>
-          <p class="note">Open this page, approve access, then copy the code it shows you:</p>
-          <div class="row"><button class="action primary" data-verify>Open sign-in page</button></div>
+          <p class="note">Open this page and approve access. If Claude shows a code, paste it below:</p>
+          <div class="row">
+            <button class="action primary" data-verify>Open sign-in page</button>
+            <button class="action" data-copy-link>Copy sign-in link</button>
+          </div>
           <p class="link" data-authlink></p>
+          <p class="note">This is an HTTPS link, not a localhost link. You can copy it to another
+            browser or trusted device for authorization.</p>
         </div>
         <div class="field">
-          <label for="authCode">Authorization code</label>
-          <input id="authCode" type="text" placeholder="code#state" autocomplete="off" spellcheck="false">
+          <label for="authCode">Paste code here if prompted</label>
+          <input id="authCode" type="text" placeholder="Paste the code shown after approval" autocomplete="off" spellcheck="false">
         </div>
         <div class="status" data-busy hidden><span class="spinner"></span><span data-status>Exchanging…</span></div>
         <div class="row">
@@ -656,8 +670,8 @@ function claudeCards() {
           <button class="action" data-retry="code">Retry</button>
           <button class="action" data-cancel>Cancel</button>
         </div>
-        <p class="note">The page shows the code as <code>code#state</code> — paste the whole thing.
-          Pasting the full callback URL works too. Codes are single-use and expire within minutes.</p>
+        <p class="note">Paste the complete value shown by Claude. Pasting the full callback URL also
+          works. Codes are single-use and expire within minutes.</p>
       </div>
     </section>
 
@@ -973,6 +987,8 @@ function reset(name) {
   if (status && (!SECRET_INPUT[name] || TWO_STEP[name])) status.hidden = false;
   const copy = within(name, '[data-copy]');
   if (copy) copy.textContent = 'Copy code';
+  const copyLink = within(name, '[data-copy-link]');
+  if (copyLink) copyLink.textContent = 'Copy sign-in link';
   const retry = within(name, '[data-retry]');
   if (retry && SECRET_INPUT[name] && !TWO_STEP[name]) retry.hidden = true;
 }
@@ -1060,8 +1076,22 @@ document.querySelectorAll('[data-verify]').forEach((button) =>
     if (button.dataset.url) vscode.postMessage({ type: 'openExternal', url: button.dataset.url });
   }));
 document.querySelectorAll('[data-copy]').forEach((button) =>
-  button.addEventListener('click', () =>
-    vscode.postMessage({ type: 'copy', value: within(method, '[data-code]').textContent })));
+  button.addEventListener('click', () => {
+    const name = button.closest('.card').dataset.method;
+    vscode.postMessage({
+      type: 'copy',
+      method: name,
+      target: 'code',
+      value: within(name, '[data-code]').textContent
+    });
+  }));
+document.querySelectorAll('[data-copy-link]').forEach((button) =>
+  button.addEventListener('click', () => {
+    const name = button.closest('.card').dataset.method;
+    if (button.dataset.url) {
+      vscode.postMessage({ type: 'copy', method: name, target: 'link', value: button.dataset.url });
+    }
+  }));
 
 window.addEventListener('message', (event) => {
   const data = event.data || {};
@@ -1084,7 +1114,11 @@ window.addEventListener('message', (event) => {
       within(name, '[data-hint]').textContent = 'Enter this code after signing in'
         + (parsed.expiresIn ? '. It expires in ' + parsed.expiresIn + '.' : '.');
       within(name, '[data-status]').textContent = 'Waiting for you to enter the code…';
-      if (parsed.verificationUrl) within(name, '[data-verify]').dataset.url = parsed.verificationUrl;
+      if (parsed.verificationUrl) {
+        within(name, '[data-verify]').dataset.url = parsed.verificationUrl;
+        const copyLink = within(name, '[data-copy-link]');
+        if (copyLink) copyLink.dataset.url = parsed.verificationUrl;
+      }
     }
     if (parsed.authorizeUrl) {
       const block = within(name, '[data-link]');
@@ -1095,6 +1129,8 @@ window.addEventListener('message', (event) => {
         link.onclick = () => vscode.postMessage({ type: 'openExternal', url: parsed.authorizeUrl });
         const verify = within(name, '[data-verify]');
         if (verify) verify.dataset.url = parsed.authorizeUrl;
+        const copyLink = within(name, '[data-copy-link]');
+        if (copyLink) copyLink.dataset.url = parsed.authorizeUrl;
       }
       const status = within(name, '.status');
       if (status) status.hidden = TWO_STEP[name] === true;
@@ -1103,8 +1139,9 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (data.type === 'copied') {
-    const copy = within(name, '[data-copy]');
-    if (copy) copy.textContent = 'Copied';
+    const copiedMethod = data.method || name;
+    const copy = within(copiedMethod, data.target === 'link' ? '[data-copy-link]' : '[data-copy]');
+    if (copy) copy.textContent = data.target === 'link' ? 'Copied link' : 'Copied';
     return;
   }
   if (data.type === 'done') {

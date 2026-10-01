@@ -66,6 +66,26 @@ test('sign-in failures render inside and reopen the originating method card', as
   assert.doesNotMatch(createdPanel.webview.html, /outcome\.innerHTML = '<span class="error">Sign-in did not complete/);
 });
 
+test('provider sign-in links can be copied with method-scoped feedback', async () => {
+  const panel = new LoginPanel({}, async () => ({}), {});
+  await panel.open({ provider: 'codex', label: 'Test' });
+  assert.match(createdPanel.webview.html, /data-copy-link>Copy sign-in link/);
+  assert.match(createdPanel.webview.html, /target: 'link'/);
+  assert.match(createdPanel.webview.html, /copyLink\.dataset\.url = parsed\.authorizeUrl/);
+  assert.match(createdPanel.webview.html, /copyLink\.dataset\.url = parsed\.verificationUrl/);
+  assert.match(createdPanel.webview.html, /data\.method \|\| name/);
+});
+
+test('Claude code flow uses recognizable wording and explains remote authorization', async () => {
+  const panel = new LoginPanel({}, async () => ({}), {});
+  await panel.open({ provider: 'claude', label: 'Test' });
+  assert.match(createdPanel.webview.html, /Paste code here if prompted/);
+  assert.match(createdPanel.webview.html, /Paste the code shown after approval/);
+  assert.doesNotMatch(createdPanel.webview.html, /placeholder="code#state"/);
+  assert.match(createdPanel.webview.html, /HTTPS link, not a localhost link/);
+  assert.match(createdPanel.webview.html, /data-copy-link>Copy sign-in link/);
+});
+
 test('login operations are serialized and failed provisional accounts are rolled back', async () => {
   const removals = [];
   const panel = new LoginPanel(
