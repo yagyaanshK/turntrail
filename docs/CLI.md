@@ -116,9 +116,22 @@ Generate a deterministic handoff file.
 ```bash
 turntrail export --to codex
 turntrail export --to claude --max-chars 60000
+turntrail export --to claude --max-tokens 20000
+turntrail export --to claude --dry-run
 ```
 
-The generated file appears in `.turntrail/exports/`.
+The generated file appears in `.turntrail/exports/`. After writing it, the command prints how many
+turns were included, omitted, or truncated and the estimated size of the handoff.
+
+`--max-chars` is the hard rendered-character boundary and stays on by default. `--max-tokens` adds an optional
+approximate token budget on top of it; both limits are enforced together, so a turn must fit within
+whichever is tighter. The token figure comes from a deterministic local estimate
+(`utf8-bytes-v1`: one token per three UTF-8 bytes, rounded up), not from a model tokenizer, so treat
+it as a planning aid rather than an exact count.
+
+`--dry-run` runs the exact planning pass a real export would and prints the result without writing
+an export file, recording a manifest entry, or storing reversible attachments. Use it to check how
+much of a long session survives a budget before you commit to it.
 
 ## `status`
 

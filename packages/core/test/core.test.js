@@ -8,6 +8,8 @@ import {
   dedupeAdjacentTurns,
   discoverNativeSessions,
   exportHandoff,
+  estimateTextTokens,
+  inspectHandoff,
   importNativeSession,
   importTranscript,
   initStore,
@@ -18,6 +20,7 @@ import {
   readManifest,
   renderHandoff,
   sanitizeContentForHandoff,
+  selectPreparedTurns,
   selectTurns,
   summarizeSession,
   truncateTurnContent,
@@ -65,6 +68,42 @@ test('budgeted turn selection keeps user turns first', () => {
   assert.equal(selected.turns.length, 1);
   assert.equal(selected.turns[0].role, 'user');
   assert.equal(selected.omittedTurns, 2);
+});
+
+test('token estimates are deterministic and account for UTF-8 text', () => {
+  assert.equal(estimateTextTokens(''), 0);
+  assert.equal(estimateTextTokens('abcdef'), 2);
+  assert.equal(estimateTextTokens('hello'), estimateTextTokens('hello'));
+  assert.ok(estimateTextTokens('你好') >= 2);
+});
+
+test('estimated-token budget constrains selection independently of the character cap', () => {
+  const prepared = prepareTurns([
+    { role: 'assistant', content: 'older answer', timestamp: '1' },
+    { role: 'user', content: `important ${'x'.repeat(1200)}`, timestamp: '2' },
+    { role: 'assistant', content: 'latest answer', timestamp: '3' }
+  ]);
+  const selected = selectPreparedTurns(prepared, 10000, { maxTokens: 120 });
+  assert.equal(selected.prepared.some((item) => item.role === 'user'), true);
+  assert.ok(selected.prepared.reduce((sum, item) => sum + item.estimatedTokens, 0) <= 120);
+  assert.match(selected.prepared.find((item) => item.role === 'user').block, /Turntrail truncated/);
+});
+
+test('handoff inspection reports the exact plan without writing files', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-inspect-'));
+  await initStore(root);
+  await writeSession(root, [
+    { role: 'tool', content: 'x'.repeat(5000), provider: 'openai', surface: 'cli', timestamp: '1' }
+  ], { provider: 'openai', surface: 'cli', sessionId: 'inspect-test' });
+
+  const before = await readManifest(root);
+  const inspected = await inspectHandoff(root, { target: 'claude', toolMaxChars: 100 });
+  const after = await readManifest(root);
+  assert.equal(inspected.metrics.attachmentCount, 1);
+  assert.ok(inspected.metrics.handoffEstimatedTokens > 0);
+  assert.deepEqual(after.exports, before.exports);
+  assert.deepEqual(await fs.readdir(path.join(root, '.turntrail', 'exports')), []);
+  assert.deepEqual(await fs.readdir(path.join(root, '.turntrail', 'attachments')), []);
 });
 
 test('budgeted selection prefers recent turns and stops instead of skipping', () => {

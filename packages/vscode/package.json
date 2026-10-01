@@ -326,6 +326,12 @@
           "default": 120000,
           "description": "Character budget for the transcript embedded in a handoff. Receiving agents refuse or silently truncate oversized files, so an unbounded handoff delivers less than a budgeted one. User turns are reserved first, then the most recent remaining turns fill the budget; anything dropped is reported in the handoff header. 0 disables clipping."
         },
+        "turntrail.maxExportTokens": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Optional approximate token budget for the transcript embedded in a handoff. Turntrail uses a conservative local estimate rather than a model-specific tokenizer. 0 disables this constraint; the character safety limit still applies."
+        },
         "turntrail.sinceLastExport": {
           "type": "boolean",
           "default": false,
@@ -412,6 +418,10 @@
         "contextBridge.maxExportChars": {
           "type": "number",
           "deprecationMessage": "Renamed to turntrail.maxExportChars. Existing values remain supported."
+        },
+        "contextBridge.maxExportTokens": {
+          "type": "number",
+          "deprecationMessage": "Renamed to turntrail.maxExportTokens. Existing values remain supported."
         },
         "contextBridge.sinceLastExport": {
           "type": "boolean",

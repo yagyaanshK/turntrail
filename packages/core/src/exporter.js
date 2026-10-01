@@ -11,6 +11,7 @@ import { resolveLedger } from './fs-utils.js';
 import { mediaReferencesFromMetadata, safeMetadataValue, sanitizeContentForHandoff } from './media.js';
 import { summarizeSession } from './summary.js';
 import { describeReturn, lastSeenBy, originChat, stripHandoffPlumbing, turnsAfter } from './roundtrip.js';
+import { estimateTextTokens, TOKEN_ESTIMATOR } from './tokens.js';
 
 // Default caps for high-volume, low-signal roles. Tool outputs (git diffs, dir
 // listings) and system turn-context blobs dominate handoff size while the
@@ -26,6 +27,7 @@ export const DEFAULT_SYSTEM_MAX_CHARS = 800;
 // reliable. ~120k chars is roughly 30k tokens: enough for a long session, small
 // enough to leave the receiver room to actually work. 0 still disables clipping.
 export const DEFAULT_MAX_CHARS = 120000;
+export const DEFAULT_MAX_TOKENS = 0;
 
 // How much of the captured uncommitted diff to render. The snapshot stores more
 // than this; the handoff shows enough to orient the receiver, which can read the
@@ -33,6 +35,27 @@ export const DEFAULT_MAX_CHARS = 120000;
 export const DEFAULT_SNAPSHOT_DIFF_MAX_CHARS = 4000;
 
 export async function exportHandoff(root, options = {}) {
+  const plan = await buildHandoffPlan(root, options);
+  await persistAttachments(root, plan.attachmentItems);
+  const written = await writeExport(root, plan.target, plan.content, {
+    keep: options.keepExports,
+    attachments: plan.attachmentHashes
+  });
+  return { ...written, metrics: plan.metrics };
+}
+
+// Build exactly what exportHandoff would write without mutating the ledger.
+// This powers CLI/UI previews and keeps planning behavior identical to export.
+export async function inspectHandoff(root, options = {}) {
+  const plan = await buildHandoffPlan(root, options);
+  return {
+    target: plan.target,
+    metrics: plan.metrics,
+    attachments: plan.attachmentItems.map((item) => ({ ...item.attachment }))
+  };
+}
+
+async function buildHandoffPlan(root, options = {}) {
   const target = normalizeTarget(options.target || 'unknown');
   const manifest = await readManifest(root);
   const allTurns = await readAllTurns(root, options);
@@ -61,17 +84,18 @@ export async function exportHandoff(root, options = {}) {
   const deduped = dedupe ? dedupeAdjacentTurns(windowed) : { turns: windowed, removed: 0 };
   const truncation = resolveTruncation(options);
   const maxChars = pickCap(options.maxChars, DEFAULT_MAX_CHARS);
+  const maxTokens = pickCap(options.maxTokens, DEFAULT_MAX_TOKENS);
   const attachmentBase = path.posix.join(path.basename(resolveLedger(root)), 'attachments');
   const prepared = prepareTurns(deduped.turns, truncation, { attachmentBase });
-  const selection = selectPreparedTurns(prepared, maxChars);
+  const selection = selectPreparedTurns(prepared, maxChars, { maxTokens });
   const snapshotDiffMaxChars = pickCap(options.snapshotDiffMaxChars, DEFAULT_SNAPSHOT_DIFF_MAX_CHARS);
   const preparedSnapshotDiff = prepareSnapshotDiff(snapshot, snapshotDiffMaxChars, { attachmentBase });
   const attachmentItems = [
     ...selection.prepared.filter((item) => item.attachment),
     ...(preparedSnapshotDiff?.attachment ? [{ ...preparedSnapshotDiff, sanitizedContent: preparedSnapshotDiff.fullContent }] : [])
   ];
-  await persistAttachments(root, attachmentItems);
-  const attachmentHashes = attachmentItems.map((item) => item.attachment.hash);
+  const attachmentHashes = [...new Set(attachmentItems.map((item) => item.attachment.hash))];
+  const transcriptMetrics = selectionMetrics(prepared, selection.prepared, selection.omittedTurns, attachmentHashes.length);
 
   const content = renderHandoff({
     target,
@@ -87,6 +111,8 @@ export async function exportHandoff(root, options = {}) {
     returningSummary: returning ? summarizeSession(returning.turns, options) : undefined,
     origin: originChat(manifest, target),
     maxChars,
+    maxTokens,
+    estimatedTranscriptTokens: transcriptMetrics.selectedEstimatedTokens,
     sinceTimestamp: appliedSince,
     truncation,
     // Summarize the full windowed transcript, not just the turns that survived
@@ -96,7 +122,20 @@ export async function exportHandoff(root, options = {}) {
     snapshotDiffMaxChars,
     preparedSnapshotDiff
   });
-  return writeExport(root, target, content, { keep: options.keepExports, attachments: attachmentHashes });
+  return {
+    target,
+    content,
+    attachmentItems,
+    attachmentHashes,
+    metrics: {
+      estimator: TOKEN_ESTIMATOR,
+      ...transcriptMetrics,
+      handoffChars: content.length,
+      handoffEstimatedTokens: estimateTextTokens(content),
+      maxChars,
+      maxTokens
+    }
+  };
 }
 
 // Collapse runs of identical role+content turns. Native logs (notably Codex)
@@ -178,6 +217,7 @@ function prepareTurn(turn, truncation, options) {
 function buildPreparedTurn(turn, headerLines, sanitizedContent, maxContentChars, options = {}) {
   const truncated = truncateTurnContent(sanitizedContent, maxContentChars, options);
   const block = [...headerLines, '```text', truncated.content.replaceAll('```', '` ` `'), '```', ''].join('\n');
+  const fullBlock = [...headerLines, '```text', sanitizedContent.replaceAll('```', '` ` `'), '```', ''].join('\n');
   return {
     turn,
     role: turn.role,
@@ -185,6 +225,9 @@ function buildPreparedTurn(turn, headerLines, sanitizedContent, maxContentChars,
     block,
     // +1 for the newline that joins this block to the next one.
     size: block.length + 1,
+    estimatedTokens: estimateTextTokens(`${block}\n`),
+    fullSize: fullBlock.length + 1,
+    fullEstimatedTokens: estimateTextTokens(`${fullBlock}\n`),
     truncatedChars: truncated.removed,
     attachment: truncated.attachment,
     attachmentBase: options.attachmentBase,
@@ -211,28 +254,32 @@ function buildPreparedTurn(turn, headerLines, sanitizedContent, maxContentChars,
 // User turns are reserved first: they carry the intent the handoff exists to
 // preserve and are only a few percent of the volume. Both passes run newest
 // first, because a handoff is about continuing, not about history.
-export function selectPreparedTurns(prepared, maxChars) {
-  if (!maxChars || maxChars <= 0) return { prepared, omittedTurns: 0 };
+export function selectPreparedTurns(prepared, maxChars, options = {}) {
+  const maxTokens = positiveCap(options.maxTokens);
+  const charCap = positiveCap(maxChars);
+  if (!charCap && !maxTokens) return { prepared, omittedTurns: 0 };
 
   const candidates = [...prepared];
   let forcedUser;
   const latestUserIndex = candidates.findLastIndex((item) => item.role === 'user');
-  if (latestUserIndex >= 0 && candidates[latestUserIndex].size > maxChars) {
-    const fitted = fitPreparedTurn(candidates[latestUserIndex], maxChars);
+  if (latestUserIndex >= 0 && !fitsBudget(candidates[latestUserIndex], charCap, maxTokens)) {
+    const fitted = fitPreparedTurn(candidates[latestUserIndex], charCap, maxTokens);
     candidates[latestUserIndex] = fitted;
-    if (fitted.size > maxChars) forcedUser = fitted;
+    if (!fitsBudget(fitted, charCap, maxTokens)) forcedUser = fitted;
   }
 
   const selected = new Set(forcedUser ? [forcedUser] : []);
-  let used = forcedUser?.size || 0;
+  let usedChars = forcedUser?.size || 0;
+  let usedTokens = forcedUser?.estimatedTokens || 0;
 
   const fillNewestFirst = (items) => {
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i];
       if (selected.has(item)) continue;
-      if (used + item.size > maxChars) break;
+      if ((charCap && usedChars + item.size > charCap) || (maxTokens && usedTokens + item.estimatedTokens > maxTokens)) break;
       selected.add(item);
-      used += item.size;
+      usedChars += item.size;
+      usedTokens += item.estimatedTokens;
     }
   };
 
@@ -244,16 +291,16 @@ export function selectPreparedTurns(prepared, maxChars) {
   return { prepared: kept, omittedTurns: candidates.length - kept.length };
 }
 
-function fitPreparedTurn(item, maxChars) {
+function fitPreparedTurn(item, maxChars, maxTokens) {
   let low = 1;
-  let high = Math.min(item.sanitizedContent.length, maxChars);
+  let high = Math.min(item.sanitizedContent.length, maxChars || item.sanitizedContent.length);
   let best;
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     const candidate = buildPreparedTurn(item.turn, item.headerLines, item.sanitizedContent, middle, {
       attachmentBase: item.attachmentBase
     });
-    if (candidate.size <= maxChars) {
+    if (fitsBudget(candidate, maxChars, maxTokens)) {
       best = candidate;
       low = middle + 1;
     } else {
@@ -263,6 +310,28 @@ function fitPreparedTurn(item, maxChars) {
   return best || buildPreparedTurn(item.turn, item.headerLines, item.sanitizedContent, 1, {
     attachmentBase: item.attachmentBase
   });
+}
+
+function fitsBudget(item, maxChars, maxTokens) {
+  return (!maxChars || item.size <= maxChars) && (!maxTokens || item.estimatedTokens <= maxTokens);
+}
+
+function positiveCap(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function selectionMetrics(all, selected, omittedTurns, attachmentCount) {
+  return {
+    sourceTurns: all.length,
+    selectedTurns: selected.length,
+    omittedTurns,
+    truncatedTurns: selected.filter((item) => item.truncatedChars > 0).length,
+    sourceChars: all.reduce((total, item) => total + item.fullSize, 0),
+    selectedChars: selected.reduce((total, item) => total + item.size, 0),
+    sourceEstimatedTokens: all.reduce((total, item) => total + item.fullEstimatedTokens, 0),
+    selectedEstimatedTokens: selected.reduce((total, item) => total + item.estimatedTokens, 0),
+    attachmentCount
+  };
 }
 
 export function prepareSnapshotDiff(snapshot, maxChars, options = {}) {
@@ -328,6 +397,8 @@ export function renderHandoff({
   returningSummary,
   origin,
   maxChars,
+  maxTokens,
+  estimatedTranscriptTokens,
   sinceTimestamp,
   truncation = {},
   summary,
@@ -376,6 +447,10 @@ export function renderHandoff({
   lines.push(`- Snapshots: ${(manifest.snapshots || []).length}`);
   lines.push(`- Exports: ${(manifest.exports || []).length}`);
   if (maxChars) lines.push(`- Export max chars: ${maxChars}`);
+  if (maxTokens) lines.push(`- Export max estimated tokens: ${maxTokens}`);
+  if (estimatedTranscriptTokens !== undefined) {
+    lines.push(`- Included transcript estimate: ~${estimatedTranscriptTokens} tokens (${TOKEN_ESTIMATOR})`);
+  }
   if (sinceTimestamp) lines.push(`- Transcript limited to turns after: ${metadataText(sinceTimestamp)}`);
   if (omittedTurns > 0) lines.push(`- Omitted turns due to budget: ${omittedTurns}`);
   if (collapsedDuplicates > 0) lines.push(`- Collapsed duplicate turns: ${collapsedDuplicates}`);

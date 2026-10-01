@@ -104,6 +104,7 @@ a machine/editor that fully stopped it, must be resumed again.
 | `toolMaxChars` | `2000` | Truncate long tool outputs (git diffs, listings); `0` disables. |
 | `systemMaxChars` | `800` | Truncate long system turns; `0` disables. |
 | `maxExportChars` | `120000` | Character budget for the transcript. User turns are reserved first, then the most recent turns fill the budget; `0` disables it. |
+| `maxExportTokens` | `0` | Approximate token budget for the transcript, enforced alongside the character budget. Turntrail uses a conservative local estimate, not a model tokenizer; `0` disables it. |
 | `sinceLastExport` | `false` | Send only what the receiving agent has not seen — its own last turn, or the last handoff aimed at it, whichever is later. Leave off if you paste handoffs into fresh sessions. |
 | `snapshotDiffMaxChars` | `4000` | How much of the uncommitted diff (vs HEAD) to embed; `0` shows the file-level stat only. |
 | `keepExports` | `10` | Past handoff files kept in `.turntrail/exports`; older ones are deleted after each export. `0` keeps all. |

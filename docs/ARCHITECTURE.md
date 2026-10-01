@@ -209,6 +209,18 @@ If a budget is provided, the exporter includes turns by a deterministic priority
 
 Raw sessions remain available on disk even when not fully embedded.
 
+Two budgets can apply at once. The character budget is the hard rendered-size safety boundary and is on by
+default. An optional estimated-token budget is enforced alongside it, so a turn is admitted only
+when it fits both. The estimate is deterministic and dependency-free (`utf8-bytes-v1`: one token per
+three UTF-8 bytes, rounded up); it is deliberately conservative for prose and code and is always
+labeled as an estimate. No model-specific context window is assumed.
+
+Planning and persistence are separate phases. `inspectHandoff` runs the same planning pass as
+`exportHandoff` and returns the target, the planned attachments, and metrics (turn counts, omitted
+and truncated turns, source and selected sizes in characters and estimated tokens, and the final
+handoff size) without touching the ledger. `exportHandoff` returns the same metrics alongside the
+written path, and the handoff header records the budgets and the included-transcript estimate.
+
 ### Reversible export attachments
 
 Role caps and snapshot-diff caps keep a handoff readable, but their omission markers are reversible.

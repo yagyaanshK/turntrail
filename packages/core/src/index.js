@@ -9,6 +9,7 @@ export {
 export { collapseCodexStreamDuplicates } from './adapters/codex.js';
 export {
   exportHandoff,
+  inspectHandoff,
   renderHandoff,
   prepareTurns,
   selectTurns,
@@ -17,10 +18,12 @@ export {
   truncateTurnContent,
   prepareSnapshotDiff,
   DEFAULT_MAX_CHARS,
+  DEFAULT_MAX_TOKENS,
   DEFAULT_SNAPSHOT_DIFF_MAX_CHARS,
   DEFAULT_TOOL_MAX_CHARS,
   DEFAULT_SYSTEM_MAX_CHARS
 } from './exporter.js';
+export { estimateTextTokens, TOKEN_ESTIMATOR } from './tokens.js';
 export { summarizeSession } from './summary.js';
 export {
   describeReturn,

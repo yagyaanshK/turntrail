@@ -20,6 +20,31 @@ test('cli init and status write expected output', async () => {
   assert.match(output, /Sessions: 0/);
 });
 
+test('cli export dry-run reports a plan without writing an export', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-cli-dry-run-'));
+  let output = '';
+  const io = { stdout: { write: (chunk) => { output += chunk; } } };
+  await runCli(['init', '--cwd', root], io);
+  output = '';
+  await runCli(['export', '--to', 'claude', '--dry-run', '--max-tokens', '1000', '--cwd', root], io);
+  assert.match(output, /no files written/);
+  assert.match(output, /Estimated final size: ~\d+ tokens/);
+  assert.deepEqual(await fs.readdir(path.join(root, '.turntrail', 'exports')), []);
+});
+
+test('cli export writes a handoff and reports its planning metrics', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-cli-export-'));
+  let output = '';
+  const io = { stdout: { write: (chunk) => { output += chunk; } } };
+  await runCli(['init', '--cwd', root], io);
+  output = '';
+  await runCli(['export', '--to', 'claude', '--max-tokens', '1000', '--cwd', root], io);
+  assert.match(output, /Wrote handoff to exports\//);
+  assert.match(output, /Estimated final size: ~\d+ tokens/);
+  assert.match(output, /Reversible attachments stored: 0/);
+  assert.equal((await fs.readdir(path.join(root, '.turntrail', 'exports'))).length, 1);
+});
+
 test('account maintain renders scheduler-friendly results', async () => {
   let output = '';
   const io = { stdout: { write: (chunk) => { output += chunk; } } };

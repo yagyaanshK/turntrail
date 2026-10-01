@@ -1299,6 +1299,7 @@ async function handoff(target, mode, selected, delivery = 'clipboard') {
   // 0 is a meaningful value here ("no clipping"), so it must reach the core
   // instead of collapsing to undefined and picking up the default budget.
   const maxChars = numberSetting(setting('maxExportChars'));
+  const maxTokens = numberSetting(setting('maxExportTokens'));
   const dedupe = setting('dedupeTurns') !== false;
   const sinceLastExport = Boolean(setting('sinceLastExport'));
   const toolMaxChars = numberSetting(setting('toolMaxChars'));
@@ -1331,6 +1332,7 @@ async function handoff(target, mode, selected, delivery = 'clipboard') {
     return exportHandoff(root, {
       target,
       maxChars,
+      maxTokens,
       dedupe,
       sinceLastExport,
       toolMaxChars,

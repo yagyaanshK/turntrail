@@ -8,6 +8,7 @@ import {
   createAccount,
   discoverNativeSessions,
   exportHandoff,
+  inspectHandoff,
   getCodexUsage,
   headlineRemaining,
   importCodexAuth,
@@ -34,7 +35,8 @@ Usage:
   turntrail import-native --provider claude|codex|gemini|cursor [--last|--session <id>] [--all] [--subagent-transcripts] [--force] [--cwd <path>]
   turntrail run claude|codex|gemini|cursor [-- <native args>] [--cwd <path>]
   turntrail snapshot [--cwd <path>]
-  turntrail export --to <target> [--max-chars <n>] [--no-dedupe] [--since-last-export]
+  turntrail export --to <target> [--max-chars <n>] [--max-tokens <n>] [--dry-run]
+                        [--no-dedupe] [--since-last-export]
                         [--tool-max-chars <n>] [--system-max-chars <n>] [--cwd <path>]
   turntrail status [--cwd <path>]
   turntrail accounts [--provider codex] [--refresh]
@@ -57,6 +59,10 @@ Export options:
   --max-chars <n>         Character budget for the transcript (default 120000, 0 = off).
                           Receiving agents refuse or silently truncate oversized
                           handoffs, so the budget is on by default.
+  --max-tokens <n>        Optional approximate token budget (default 0 = off).
+                          Uses a conservative local estimate, not a model tokenizer.
+  --dry-run               Inspect the planned handoff without writing an export
+                          or reversible attachments.
   --no-dedupe             Keep consecutive duplicate turns instead of collapsing them.
   --since-last-export     Send only what the target has not seen: its own last turn,
                           or the last handoff aimed at it, whichever is later.
@@ -164,9 +170,10 @@ export async function runCli(argv, io = process, dependencies = {}) {
 
   if (command === 'export') {
     if (!flags.to) throw new Error('export requires --to <target>');
-    const result = await exportHandoff(cwd, {
+    const exportOptions = {
       target: flags.to,
       maxChars: flags.maxChars !== undefined ? Number(flags.maxChars) : undefined,
+      maxTokens: flags.maxTokens !== undefined ? Number(flags.maxTokens) : undefined,
       dedupe: flags['no-dedupe'] ? false : undefined,
       sinceLastExport: Boolean(flags.sinceLastExport),
       toolMaxChars: flags.toolMaxChars !== undefined ? Number(flags.toolMaxChars) : undefined,
@@ -175,8 +182,15 @@ export async function runCli(argv, io = process, dependencies = {}) {
         flags.snapshotDiffMaxChars !== undefined ? Number(flags.snapshotDiffMaxChars) : undefined,
       keepExports: flags.keepExports !== undefined ? Number(flags.keepExports) : undefined,
       summary: flags['no-summary'] ? false : undefined
-    });
+    };
+    if (flags.dryRun) {
+      const inspected = await inspectHandoff(cwd, exportOptions);
+      io.stdout.write(renderExportInspection(inspected));
+      return;
+    }
+    const result = await exportHandoff(cwd, exportOptions);
     io.stdout.write(`Wrote handoff to ${result.relativePath}\n`);
+    io.stdout.write(renderExportMetrics(result.metrics));
     return;
   }
 
@@ -253,6 +267,22 @@ export async function runCli(argv, io = process, dependencies = {}) {
   }
 
   throw new Error(`unknown command: ${command}`);
+}
+
+function renderExportInspection(result) {
+  return `Handoff plan for ${result.target} (no files written)\n${renderExportMetrics(result.metrics, 'planned')}`;
+}
+
+// Shared by dry runs and real exports so both report the same planning figures.
+function renderExportMetrics(metrics, attachmentState = 'stored') {
+  return [
+    `Estimated final size: ~${metrics.handoffEstimatedTokens} tokens, ${metrics.handoffChars} chars`,
+    `Transcript: ${metrics.selectedTurns}/${metrics.sourceTurns} turns, ~${metrics.selectedEstimatedTokens}/${metrics.sourceEstimatedTokens} tokens`,
+    `Omitted: ${metrics.omittedTurns} turns; truncated: ${metrics.truncatedTurns} turns`,
+    `Reversible attachments ${attachmentState}: ${metrics.attachmentCount}`,
+    `Estimator: ${metrics.estimator} (approximate, not a model tokenizer)`,
+    ''
+  ].join('\n');
 }
 
 export function renderMaintenance(maintenance) {

@@ -174,7 +174,7 @@ JSONL sources are streamed rather than loaded as one string. Discovery, imported
 > the CLI's `--provider claude` flag reads Codex paths and will misreport them. See
 > [docs/CLI.md](docs/CLI.md#accounts).
 
-**Export options:** `--max-chars <n>` (budget, default 120000, 0 = off) · `--no-dedupe` · `--since-last-export` (per target) · `--tool-max-chars <n>` (default 2000) · `--system-max-chars <n>` (default 800) · `--snapshot-diff-max-chars <n>` (default 4000) · `--keep-exports <n>` (default 10) · `--no-summary`. All flags accept kebab- or camelCase.
+**Export options:** `--max-chars <n>` (budget, default 120000, 0 = off) · `--max-tokens <n>` (approximate token budget, default 0 = off) · `--dry-run` (report the plan; write nothing) · `--no-dedupe` · `--since-last-export` (per target) · `--tool-max-chars <n>` (default 2000) · `--system-max-chars <n>` (default 800) · `--snapshot-diff-max-chars <n>` (default 4000) · `--keep-exports <n>` (default 10) · `--no-summary`. All flags accept kebab- or camelCase.
 
 ### Handing work back and forth
 
@@ -236,6 +236,7 @@ normalized local ledger; native transcript paths are not sent into the webview.
 | `toolMaxChars` | `2000` | Truncate long tool outputs (0 = off). |
 | `systemMaxChars` | `800` | Truncate long system turns (0 = off). |
 | `maxExportChars` | `120000` | Character budget for the transcript (0 = off). User turns are reserved first, then the most recent turns fill the budget. |
+| `maxExportTokens` | `0` | Approximate token budget for the transcript, applied together with the character budget (0 = off). Uses a local estimate, not a model tokenizer. |
 | `sinceLastExport` | `false` | Send only what the receiving agent has not seen — its own last turn, or the last handoff aimed at it, whichever is later. |
 | `snapshotDiffMaxChars` | `4000` | How much uncommitted diff to embed (0 = stat only). |
 | `keepExports` | `10` | Past handoff files to keep; older ones are deleted (0 = keep all). |
