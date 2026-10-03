@@ -545,7 +545,15 @@ test('a rejected refresh says to sign in again, not that a code is single-use', 
   });
   await assert.rejects(
     () => refreshClaudeToken('rt.dead', { fetch: fetchImpl }),
-    (error) => /sign in again/i.test(error.message) && !/single-use/i.test(error.message)
+    (error) => error.code === 'AUTH_EXPIRED' &&
+      /sign in again/i.test(error.message) && !/single-use/i.test(error.message)
+  );
+});
+
+test('a missing Claude refresh token is a confirmed authentication failure', async () => {
+  await assert.rejects(
+    () => refreshClaudeToken('', { fetch: async () => { throw new Error('must not fetch'); } }),
+    (error) => error.code === 'AUTH_EXPIRED' && /sign in again/i.test(error.message)
   );
 });
 
@@ -736,6 +744,7 @@ test('a Claude 401 marks the login as requiring revalidation', async () => {
     fetch: async () => ({ ok: false, status: 401, statusText: 'Unauthorized' })
   });
 
+  assert.equal(rejected.authenticationFailure, 'AUTH_REJECTED');
   assert.equal(rejected.requiresSignIn, false);
   assert.equal(rejected.requiresRevalidation, true);
   assert.match(rejected.error, /saved refresh token/i);

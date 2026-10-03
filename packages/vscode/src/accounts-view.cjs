@@ -25,6 +25,12 @@ function loginNeedsUpdate(account, activeId, hasAuthenticationIssue = false) {
     Number.isFinite(signedInAt) && Number.isFinite(lastUsedAt) && signedInAt > lastUsedAt;
 }
 
+function authenticationFailureLabel(code) {
+  if (code === 'AUTH_EXPIRED') return 'Authentication expired (AUTH_EXPIRED)';
+  if (code === 'AUTH_REJECTED') return 'Authentication rejected (AUTH_REJECTED)';
+  return undefined;
+}
+
 class AccountsStore {
   constructor(core) {
     this.core = core;
@@ -91,6 +97,35 @@ class AccountsStore {
     return this.usage.get(accountId);
   }
 
+  async reloadStaleUsage(options = {}) {
+    const model = await this.viewModel();
+    const stale = model.sections
+      .flatMap((section) => section.rows)
+      .filter((row) => row.health.id === 'usage-stale');
+    await Promise.all(stale.map((row) => this.reloadUsageOne(row.id, row.provider, {
+      ...options,
+      force: true
+    })));
+    return stale.map((row) => row.id);
+  }
+
+  async markAuthenticationFailure(accountId, failure) {
+    const code = failure?.code;
+    if (code !== 'AUTH_EXPIRED' && code !== 'AUTH_REJECTED') return false;
+
+    const current = this.usage.get(accountId) || { accountId, windows: [] };
+    this.usage.set(accountId, {
+      ...current,
+      accountId,
+      staleReason: failure.message || failure.error,
+      authenticationFailure: code,
+      requiresSignIn: code === 'AUTH_EXPIRED',
+      requiresRevalidation: code === 'AUTH_REJECTED'
+    });
+    await this.refresh();
+    return true;
+  }
+
   async refresh() {
     this.emitter.fire(await this.viewModel());
   }
@@ -150,6 +185,8 @@ class AccountsStore {
       signedIn: signedIn.get(account.id) === true && !hasAuthenticationIssue,
       requiresSignIn,
       requiresRevalidation,
+      authenticationFailure: usage?.authenticationFailure,
+      authenticationFailureLabel: authenticationFailureLabel(usage?.authenticationFailure),
       error: usage?.error === 'not-signed-in' ? undefined : usage?.error,
       limitReached: !hasAuthenticationIssue && Boolean(usage?.limitReached),
       credits: hasAuthenticationIssue ? undefined : usage?.credits,
@@ -237,6 +274,7 @@ class AccountsWebview {
     this.store = store;
     this.options = options;
     this.view = undefined;
+    this.refreshedVisibleSession = false;
     store.onDidChange((model) => this.post(model));
   }
 
@@ -283,13 +321,23 @@ class AccountsWebview {
       });
     });
 
-    // Reading quota when the panel is shown keeps the numbers current without a
-    // background timer. This is not a forced refresh, so the cache TTL still
-    // applies and repeatedly toggling the panel costs nothing.
+    // Refresh six-hour-stale cards once per visible period. The store scopes
+    // the forced reads to those accounts, so fresh accounts never get polled.
     view.onDidChangeVisibility(() => {
-      if (view.visible) this.store.reloadUsage().catch(() => this.store.refresh());
+      if (!view.visible) {
+        this.refreshedVisibleSession = false;
+        return;
+      }
+      this.refreshStaleOnOpen();
     });
     this.post(await this.store.viewModel());
+    this.refreshStaleOnOpen();
+  }
+
+  refreshStaleOnOpen() {
+    if (!this.view?.visible || this.refreshedVisibleSession) return;
+    this.refreshedVisibleSession = true;
+    this.store.reloadStaleUsage().catch(() => this.store.refresh());
   }
 
   post(model) {
@@ -710,6 +758,7 @@ function renderRow(row) {
 
   let status;
   if (row.needsActivation) status = 'New sign-in ready';
+  else if (row.authenticationFailureLabel) status = esc(row.authenticationFailureLabel);
   else if (row.requiresRevalidation) status = row.active ? 'Selected login needs repair' : 'Login needs verification';
   else if (!row.signedIn) status = row.active ? 'Selected login needs sign-in' : 'Not signed in';
   else if (row.error) status = esc(row.error);
@@ -735,6 +784,7 @@ function renderRow(row) {
     ? '<div class="additional-limits">' + row.additionalLimits.map(renderAdditionalLimit).join('') + '</div>'
     : '';
   const resetCredits = renderResetCredits(row);
+  const authenticationFailure = row.requiresSignIn || row.requiresRevalidation;
 
   const act = (action, text, cls) =>
     '<button class="' + (cls || '') + '" data-act="' + action + '" data-id="' + id +
@@ -773,13 +823,12 @@ function renderRow(row) {
         (row.signedIn && !row.needsActivation ? 'In use' : 'Selected') + '</span>' : '') +
     '</div>' +
     '<div class="actions">' +
-      (row.needsActivation
-        ? act('switch', 'Update ' + (row.provider === 'claude' ? 'Claude' : 'Codex') + ' login', 'primary')
-        : (row.requiresRevalidation
-            ? act('switch', row.active ? 'Repair login' : 'Verify & use', 'primary')
+      (authenticationFailure
+        ? act('signin', 'Sign in again', 'primary')
+        : (row.needsActivation
+            ? act('switch', 'Update ' + (row.provider === 'claude' ? 'Claude' : 'Codex') + ' login', 'primary')
             : (row.active || !row.signedIn ? '' : act('switch', 'Use this', 'primary')))) +
-      (row.signedIn || row.requiresRevalidation ? '' : act('signin', 'Sign in', 'primary')) +
-      (row.requiresRevalidation ? act('signin', 'Sign in') : '') +
+      (authenticationFailure || row.signedIn ? '' : act('signin', 'Sign in', 'primary')) +
       (row.signedIn ? act('terminal', 'Terminal') : '') +
       (row.signedIn ? act('raw', 'Raw Response') : '') +
       '<button data-ask="' + id + '">Remove</button>' +
@@ -993,4 +1042,4 @@ if (saved) {
 </html>`;
 }
 
-module.exports = { AccountsStore, AccountsWebview, PROVIDERS, loginNeedsUpdate };
+module.exports = { AccountsStore, AccountsWebview, PROVIDERS, authenticationFailureLabel, loginNeedsUpdate };

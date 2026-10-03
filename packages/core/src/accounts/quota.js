@@ -82,16 +82,14 @@ async function getUsage(accountId, read, fetchUsage, options = {}) {
     auth = await read(accountId, options);
   } catch (error) {
     // Renewing an expired login is part of reading it, and can fail on its own.
-    const requiresSignIn = error?.code === 'AUTH_EXPIRED';
-    const requiresRevalidation = error?.code === 'AUTH_REJECTED';
+    const authentication = authenticationState(error);
     if (cached) {
-      return { ...cached, fromCache: true, staleReason: error.message, requiresSignIn, requiresRevalidation };
+      return { ...cached, fromCache: true, staleReason: error.message, ...authentication };
     }
     return {
       accountId,
       error: error.message,
-      requiresSignIn,
-      requiresRevalidation,
+      ...authentication,
       fetchedAt: new Date().toISOString(),
       windows: []
     };
@@ -113,20 +111,29 @@ async function getUsage(accountId, read, fetchUsage, options = {}) {
   } catch (error) {
     // A failed refresh must not discard a good previous reading - the panel is
     // more useful showing a stale number with its age than showing nothing.
-    const requiresSignIn = error?.code === 'AUTH_EXPIRED';
-    const requiresRevalidation = error?.code === 'AUTH_REJECTED';
+    const authentication = authenticationState(error);
     if (cached) {
-      return { ...cached, fromCache: true, staleReason: error.message, requiresSignIn, requiresRevalidation };
+      return { ...cached, fromCache: true, staleReason: error.message, ...authentication };
     }
     return {
       accountId,
       error: error.message,
-      requiresSignIn,
-      requiresRevalidation,
+      ...authentication,
       fetchedAt: new Date().toISOString(),
       windows: []
     };
   }
+}
+
+function authenticationState(error) {
+  const authenticationFailure = error?.code === 'AUTH_EXPIRED' || error?.code === 'AUTH_REJECTED'
+    ? error.code
+    : undefined;
+  return {
+    authenticationFailure,
+    requiresSignIn: authenticationFailure === 'AUTH_EXPIRED',
+    requiresRevalidation: authenticationFailure === 'AUTH_REJECTED'
+  };
 }
 
 export async function getCodexUsage(accountId, options = {}) {

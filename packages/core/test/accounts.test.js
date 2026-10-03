@@ -896,6 +896,7 @@ test('a Codex 401 marks a cached credential as requiring revalidation', async ()
   });
 
   assert.equal(rejected.fromCache, true, 'the last quota reading remains available for diagnostics');
+  assert.equal(rejected.authenticationFailure, 'AUTH_REJECTED');
   assert.equal(rejected.requiresSignIn, false);
   assert.equal(rejected.requiresRevalidation, true);
   assert.match(rejected.staleReason, /verify the login/i);

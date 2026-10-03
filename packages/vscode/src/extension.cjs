@@ -182,17 +182,22 @@ async function switchAccount(item) {
   }
 
   const activate = account.provider === 'claude' ? api.activateClaudeAccount : api.activateCodexAccount;
-  let result = await activate(account.id).catch((error) => ({ error: error.message }));
+  const captureFailure = (error) => ({ error: error.message, code: error.code });
+  let result = await activate(account.id).catch(captureFailure);
   if (result?.error) {
     const raced = await api.listAgentProcesses().catch(() => []);
     const racedBlockers = api.classifyAgentProcesses(account.provider, raced);
     if (racedBlockers.length > 0) {
       const proceed = await handleRunningProviderProcesses(account, racedBlockers, api);
       if (!proceed) return;
-      result = await activate(account.id).catch((error) => ({ error: error.message }));
+      result = await activate(account.id).catch(captureFailure);
     }
   }
   if (result?.error) {
+    await accountsProvider.markAuthenticationFailure(account.id, {
+      code: result.code,
+      message: result.error
+    });
     vscode.window.showErrorMessage(`Turntrail: could not switch to "${account.label}" — ${result.error}`);
     return;
   }

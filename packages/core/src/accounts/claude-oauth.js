@@ -127,7 +127,11 @@ export async function exchangeClaudeCode(options = {}) {
 }
 
 export async function refreshClaudeToken(refreshToken, options = {}) {
-  if (!refreshToken) throw new Error('This account has no refresh token, so its login cannot be renewed.');
+  if (!refreshToken) {
+    const error = new Error('This account has no refresh token, so its login cannot be renewed. Sign in again.');
+    error.code = 'AUTH_EXPIRED';
+    throw error;
+  }
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
@@ -153,7 +157,9 @@ async function postToken(body, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(oauthErrorMessage(payload, response.status, text, options.grant));
+    const error = new Error(oauthErrorMessage(payload, response.status, text, options.grant));
+    if (options.grant === 'refresh' && payload?.error === 'invalid_grant') error.code = 'AUTH_EXPIRED';
+    throw error;
   }
   validateTokenPayload('claude', payload);
   return normalizeTokens(payload);

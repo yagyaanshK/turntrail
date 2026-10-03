@@ -28,6 +28,7 @@ function fakeStore(model) {
     onDidChange() {},
     viewModel: async () => model,
     reloadUsage: async () => {},
+    reloadStaleUsage: async () => {},
     refresh: async () => {}
   };
 }
@@ -35,6 +36,7 @@ function fakeStore(model) {
 function fakeView() {
   const posted = [];
   let onMessage;
+  let onVisibility;
   const view = {
     visible: true,
     webview: {
@@ -44,10 +46,47 @@ function fakeView() {
       onDidReceiveMessage(listener) { onMessage = listener; },
       postMessage(message) { posted.push(message); }
     },
-    onDidChangeVisibility() {}
+    onDidChangeVisibility(listener) { onVisibility = listener; }
   };
-  return { view, posted, message: (payload) => onMessage(payload) };
+  return {
+    view,
+    posted,
+    message: (payload) => onMessage(payload),
+    visibility: () => onVisibility()
+  };
 }
+
+test('opening the accounts view refreshes only stale accounts once', async () => {
+  const calls = [];
+  const model = {
+    sections: [{
+      id: 'codex',
+      rows: [
+        { id: 'old', provider: 'codex', health: { id: 'usage-stale' } },
+        { id: 'fresh', provider: 'codex', health: { id: 'healthy' } }
+      ]
+    }]
+  };
+  const store = fakeStore(model);
+  store.reloadStaleUsage = async () => calls.push('refresh');
+  const panel = new AccountsWebview(store);
+  const { view, visibility } = fakeView();
+
+  await panel.resolveWebviewView(view);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['refresh']);
+
+  visibility();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['refresh'], 'the same visible period is refreshed only once');
+
+  view.visible = false;
+  visibility();
+  view.visible = true;
+  visibility();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['refresh', 'refresh']);
+});
 
 test('the accounts panel is told the maintenance state so it can show the switch', async () => {
   let enabled = false;
@@ -57,6 +96,8 @@ test('the accounts panel is told the maintenance state so it can show the switch
   const { view, posted } = fakeView();
   await panel.resolveWebviewView(view);
   assert.match(view.webview.html, /limit\.description \|\| 'Separate allowance'/);
+  assert.match(view.webview.html, /authenticationFailure/);
+  assert.match(view.webview.html, /Sign in again/);
   assert.deepEqual(posted.at(-1).model.maintenance, { enabled: false, intervalHours: 5 });
 
   enabled = true;
