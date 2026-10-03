@@ -56,3 +56,18 @@ Build in this order:
 3. VS Code extension
 4. browser/desktop UI helpers
 5. MCP server
+
+## Release Flow
+
+When the user asks to bump and publish the extension, use this standard patch-release flow unless
+they request a different version:
+
+1. Bump the root, core, CLI, and VS Code package versions together, including exact internal core
+   dependency pins and `package-lock.json`.
+2. Run `npm test`, `npm run lint`, `npm audit`, and `npm run package:vscode`.
+3. Keep the generated `dist/turntrail-<version>.vsix` locally but untracked.
+4. Commit the version metadata as `Release Turntrail <version>`.
+5. Create and push the annotated `v<version>` tag along with `main`.
+6. Monitor the tag-triggered trusted release workflow through Marketplace publication and GitHub
+   release creation. Verify the publish log rather than assuming a successful tag push means the
+   extension was published; the public Marketplace catalog may take several minutes to update.
