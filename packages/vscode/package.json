@@ -560,6 +560,6 @@
     "@turntrail/core": "0.18.10"
   },
   "devDependencies": {
-    "@types/vscode": "^1.95.0"
+    "@types/vscode": "^1.138.0"
   }
 }
