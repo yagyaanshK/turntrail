@@ -255,9 +255,10 @@ normalized local ledger; native transcript paths are not sent into the webview.
 
 If you hold more than one Codex subscription or Claude account, Turntrail keeps them all
 signed in at once and shows what each has left. The **Accounts** panel in the activity bar lists
-them in two labelled sections — Codex and Claude Code — each with its own cards, usage bars and
-pooled total. Nothing is pooled *across* the two: the quotas are not the same currency and switching
-one has no effect on the other.
+them in two labelled sections — Codex and Claude Code — each with its own cards and usage bars.
+The section header reports how many accounts are ready, stale, blocked, or need sign-in, and groups
+comparable windows such as five-hour, weekly, and monthly limits. It never adds percentages across
+accounts or windows: those allowances are not interchangeable.
 
 Each limit window gets **its own labelled bar** — a Claude account shows one for the five-hour
 window and one for the weekly, a Codex subscription shows whichever its API reports. Each bar is
@@ -266,6 +267,12 @@ red because the short window beside it is spent. The percentage beside the accou
 tightest window, since that is the one that will actually stop you. Codex reports a second window
 only sometimes: when an account is sitting on its weekly cap it sends `secondary_window: null` and
 there is genuinely one limit to show. **Raw Response** shows what arrived.
+
+The **Suggested** badge prefers a healthy account with the broader known subscription capability,
+then compares remaining quota between similarly capable accounts. It is a general suggestion, not
+a promise that every model is available; provider-reported plan and model entitlements remain the
+authority. A successful usage read also reconciles a changed provider plan, so upgrades and
+downgrades do not leave a stale badge in the panel.
 
 ### The mechanism is one environment variable
 

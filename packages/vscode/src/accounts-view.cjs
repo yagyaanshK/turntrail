@@ -165,7 +165,7 @@ class AccountsStore {
       const rows = accounts.map((account) => this.row(account, provider, signedIn, resumesAt));
       const recommended = recommendAccount(rows);
       const presentedRows = rows.map((row) => ({ ...row, recommended: row.id === recommended?.id }));
-      sections.push({ ...provider, rows: presentedRows, pooled: pool(rows) });
+      sections.push({ ...provider, rows: presentedRows, summary: summarizeAccounts(presentedRows) });
     }
 
     return { sections, handoff: this.handoff };
@@ -188,7 +188,7 @@ class AccountsStore {
       id: account.id,
       provider: provider.id,
       label: account.label,
-      plan: account.plan ? planLabel(account.plan) : undefined,
+      plan: effectivePlan(account, usage),
       email: usage?.email || account.email,
       active: account.id === this.activeIds[provider.id],
       needsActivation,
@@ -261,20 +261,72 @@ class AccountsStore {
   }
 }
 
-function pool(rows) {
-  const values = rows.map((row) => row.remaining).filter((value) => typeof value === 'number');
-  const stamps = rows.map((row) => Date.parse(row.fetchedAt || '')).filter((value) => Number.isFinite(value));
-  return {
+function effectivePlan(account, usage) {
+  const stored = typeof account?.plan === 'string' ? account.plan.trim() : '';
+  const observed = typeof usage?.plan === 'string' ? usage.plan.trim() : '';
+  if (!observed) return stored ? planLabel(stored) : undefined;
+  if (!stored) return planLabel(observed);
+
+  const observedAt = Date.parse(usage?.fetchedAt || '');
+  const storedAt = Date.parse(account?.planUpdatedAt || account?.signedInAt || account?.lastRefreshedAt || '');
+  const current = Number.isFinite(storedAt) && Number.isFinite(observedAt) && storedAt > observedAt
+    ? stored
+    : observed;
+  return planLabel(current);
+}
+
+function summarizeAccounts(rows) {
+  const summary = {
     count: rows.length,
-    // Age of the oldest reading on screen, so the panel can say how current it
-    // is rather than leaving the user to wonder.
-    updatedAt: stamps.length > 0 ? new Date(Math.min(...stamps)).toISOString() : undefined,
-    total: values.length > 0 ? values.reduce((sum, value) => sum + value, 0) : undefined,
-    // The pooled bar is an average so it stays on a 0-100 scale even as
-    // accounts are added; the headline number stays the sum, which is what
-    // "how much do I have across everything" actually means.
-    average: values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined
+    ready: 0,
+    stale: 0,
+    signIn: 0,
+    blocked: 0,
+    unknown: 0,
+    limits: summarizeLimitFamilies(rows)
   };
+
+  for (const row of rows) {
+    const health = row.health?.id;
+    if (health === 'healthy' || health === 'low-quota') summary.ready++;
+    else if (health === 'usage-stale') summary.stale++;
+    else if (health === 'needs-sign-in' || health === 'needs-verification') summary.signIn++;
+    else if (health === 'limit-reached' || health === 'subscription-unavailable') summary.blocked++;
+    else summary.unknown++;
+  }
+
+  const suggested = rows.find((row) => row.recommended);
+  if (suggested) summary.suggested = { label: suggested.label, plan: suggested.plan };
+  return summary;
+}
+
+function summarizeLimitFamilies(rows) {
+  const families = new Map();
+  for (const row of rows) {
+    const perAccount = new Map();
+    for (const window of row.windows || []) {
+      const label = String(window.label || 'Limit');
+      const key = label.toLowerCase();
+      const previous = perAccount.get(key);
+      if (!previous || window.remaining < previous.remaining) perAccount.set(key, { label, remaining: window.remaining });
+    }
+
+    for (const [key, window] of perAccount) {
+      const family = families.get(key) || { label: window.label, eligible: 0, ready: 0, best: undefined };
+      family.eligible++;
+      const rowReady = row.health?.id === 'healthy' || row.health?.id === 'low-quota';
+      if (rowReady && typeof window.remaining === 'number' && window.remaining > 0) {
+        family.ready++;
+        family.best = family.best === undefined ? window.remaining : Math.max(family.best, window.remaining);
+      }
+      families.set(key, family);
+    }
+  }
+
+  const order = new Map([['5h', 1], ['daily', 2], ['weekly', 3], ['monthly', 4]]);
+  return [...families.entries()]
+    .sort(([left], [right]) => (order.get(left) || 99) - (order.get(right) || 99) || left.localeCompare(right))
+    .map(([, family]) => family);
 }
 
 class AccountsWebview {
@@ -451,6 +503,16 @@ function html(webview) {
   .pool-title { font-weight: 600; }
   .pool-total { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 1.1em; }
   .pool-sub { color: var(--dim); font-size: 0.9em; margin-top: 2px; }
+  .summary-status { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 0.82em; color: var(--dim); }
+  .summary-status .crit { color: var(--vscode-charts-red); }
+  .summary-status .warn { color: var(--vscode-charts-yellow); }
+  .limit-summary { margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--hairline); }
+  .limit-row {
+    display: grid; grid-template-columns: minmax(48px, 0.7fr) minmax(76px, 1fr) auto;
+    gap: 8px; align-items: baseline; min-height: 19px; font-size: 0.82em;
+  }
+  .limit-row span { color: var(--dim); }
+  .limit-row .limit-best { font-variant-numeric: tabular-nums; text-align: right; }
   .list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
   .item {
     padding: 9px 10px;
@@ -811,7 +873,7 @@ function renderRow(row) {
       '<span class="ident">' +
         '<span class="name" data-name="' + id + '"><b>' + esc(row.label) + '</b>' +
           (row.plan ? '<span class="plan">' + esc(row.plan) + '</span>' : '') +
-          (row.recommended ? '<span class="recommended">Recommended</span>' : '') +
+          (row.recommended ? '<span class="recommended">Suggested</span>' : '') +
           '<button class="pencil" data-rename="' + id + '" title="Rename" aria-label="Rename account">✎</button>' +
         '</span>' +
         '<span class="rename" data-editor="' + id + '" data-provider="' + provider + '" hidden>' +
@@ -860,7 +922,7 @@ function renderRow(row) {
 }
 
 function renderSection(section) {
-  const pooled = section.pooled;
+  const summary = section.summary;
   const provider = esc(section.id);
   const noun = esc(section.noun);
 
@@ -870,11 +932,12 @@ function renderSection(section) {
       '<button class="add adopt" data-act="import" data-provider="' + provider + '">' +
         'Use the ' + esc(section.title) + ' login on this machine</button>'
     : '<div class="pool">' +
-        '<div class="pool-top"><span class="pool-title">Usage remaining</span>' +
-          '<span class="pool-total">' + (pooled.total === undefined ? '—' : pct(pooled.total)) + '</span></div>' +
-        '<div class="pool-sub">' + pooled.count + ' connected ' + noun + (pooled.count === 1 ? '' : 's') + '</div>' +
-        '<div class="bar"><i style="width:' + (pooled.average || 0) + '%;--fill:var(--edge)"></i></div>' +
-        '<div class="pool-foot"><span>' + (pooled.updatedAt ? 'Updated ' + ago(pooled.updatedAt) : 'Not read yet') + '</span>' +
+        '<div class="pool-top"><span class="pool-title">Account readiness</span>' +
+          '<span class="pool-total">' + summary.ready + '/' + summary.count + ' ready</span></div>' +
+        '<div class="pool-sub">' + summary.count + ' connected ' + noun + (summary.count === 1 ? '' : 's') + '</div>' +
+        renderReadiness(summary) +
+        renderLimitSummary(summary.limits) +
+        '<div class="pool-foot"><span>' + renderSuggested(summary.suggested) + '</span>' +
           '<button class="pool-refresh" data-act="refresh" data-provider="' + provider + '">Refresh now</button></div>' +
       '</div>' +
       '<ul class="list">' + section.rows.map(renderRow).join('') + '</ul>';
@@ -885,6 +948,30 @@ function renderSection(section) {
     '<button class="add" data-act="add" data-provider="' + provider + '">+ ' +
       (section.rows.length === 0 ? 'Sign in to a' + article(noun) : 'Add another') + ' ' + noun + '</button>' +
   '</section>';
+}
+
+function renderReadiness(summary) {
+  const statuses = [];
+  if (summary.signIn) statuses.push('<span class="crit">' + summary.signIn + ' sign-in required</span>');
+  if (summary.stale) statuses.push('<span class="warn">' + summary.stale + ' stale</span>');
+  if (summary.blocked) statuses.push('<span class="crit">' + summary.blocked + ' blocked</span>');
+  if (summary.unknown) statuses.push('<span>' + summary.unknown + ' unknown</span>');
+  if (statuses.length === 0) statuses.push('<span>All connected accounts are ready</span>');
+  return '<div class="summary-status">' + statuses.join('') + '</div>';
+}
+
+function renderLimitSummary(limits) {
+  if (!limits?.length) return '';
+  return '<div class="limit-summary">' + limits.map((limit) =>
+    '<div class="limit-row"><b>' + esc(limit.label) + '</b>' +
+      '<span>' + limit.ready + '/' + limit.eligible + ' ready</span>' +
+      '<span class="limit-best">' + (limit.best === undefined ? 'none ready' : 'best ' + pct(limit.best)) + '</span></div>'
+  ).join('') + '</div>';
+}
+
+function renderSuggested(suggested) {
+  if (!suggested) return 'No account is currently suitable';
+  return 'Suggested: ' + esc(suggested.label) + (suggested.plan ? ' · ' + esc(suggested.plan) : '');
 }
 
 // Handoff, as a card rather than a command you have to remember. The palette
@@ -1059,4 +1146,12 @@ if (saved) {
 </html>`;
 }
 
-module.exports = { AccountsStore, AccountsWebview, PROVIDERS, authenticationFailureLabel, loginNeedsUpdate };
+module.exports = {
+  AccountsStore,
+  AccountsWebview,
+  PROVIDERS,
+  authenticationFailureLabel,
+  effectivePlan,
+  loginNeedsUpdate,
+  summarizeAccounts
+};

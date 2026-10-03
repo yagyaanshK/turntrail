@@ -18,6 +18,8 @@ Module._load = function load(request, parent, isMain) {
 const {
   AccountsStore,
   authenticationFailureLabel,
+  effectivePlan,
+  summarizeAccounts,
   loginNeedsUpdate
 } = require('../src/accounts-view.cjs');
 const { classifyAccountHealth, recommendAccount } = require('../src/account-health.cjs');
@@ -184,4 +186,67 @@ test('recommendation is deterministic and prefers the active account on an exact
     { id: 'account-a', signedIn: true, remaining: 60, fetchedAt, active: true }
   ]);
   assert.equal(recommended.id, 'account-a');
+});
+
+test('recommendation prefers broader known capability before remaining quota', () => {
+  const fetchedAt = new Date().toISOString();
+  const recommended = recommendAccount([
+    { id: 'free', plan: 'Free', signedIn: true, remaining: 100, fetchedAt },
+    { id: 'unknown', plan: 'Prolite', signedIn: true, remaining: 100, fetchedAt },
+    { id: 'plus', plan: 'Plus', signedIn: true, remaining: 30, fetchedAt }
+  ]);
+  assert.equal(recommended.id, 'plus');
+});
+
+test('the newest known plan source wins without guessing from limit windows', () => {
+  assert.equal(effectivePlan(
+    { plan: 'plus' },
+    { plan: 'free', fetchedAt: '2026-10-03T12:00:00.000Z' }
+  ), 'Free');
+  assert.equal(effectivePlan(
+    { plan: 'plus', planUpdatedAt: '2026-10-03T13:00:00.000Z' },
+    { plan: 'free', fetchedAt: '2026-10-03T12:00:00.000Z' }
+  ), 'Plus');
+  assert.equal(effectivePlan(
+    { plan: 'plus', signedInAt: '2026-10-03T13:00:00.000Z' },
+    { plan: 'free', fetchedAt: '2026-10-03T12:00:00.000Z' }
+  ), 'Plus');
+  assert.equal(effectivePlan({ plan: 'edu' }, { windows: [{ label: 'monthly' }] }), 'Edu');
+});
+
+test('account summary reports readiness and comparable limit families without pooling percentages', () => {
+  const summary = summarizeAccounts([
+    {
+      id: 'plus', label: 'Primary', plan: 'Plus', recommended: true,
+      health: { id: 'healthy' },
+      windows: [{ label: '5h', remaining: 40 }, { label: 'weekly', remaining: 70 }]
+    },
+    {
+      id: 'free', label: 'Free', plan: 'Free',
+      health: { id: 'healthy' },
+      windows: [{ label: 'monthly', remaining: 100 }]
+    },
+    {
+      id: 'expired', label: 'Expired',
+      health: { id: 'needs-sign-in' }, windows: []
+    },
+    {
+      id: 'stale', label: 'Stale',
+      health: { id: 'usage-stale' },
+      windows: [{ label: 'weekly', remaining: 90 }]
+    }
+  ]);
+
+  assert.deepEqual(
+    { count: summary.count, ready: summary.ready, stale: summary.stale, signIn: summary.signIn },
+    { count: 4, ready: 2, stale: 1, signIn: 1 }
+  );
+  assert.deepEqual(summary.suggested, { label: 'Primary', plan: 'Plus' });
+  assert.deepEqual(summary.limits, [
+    { label: '5h', eligible: 1, ready: 1, best: 40 },
+    { label: 'weekly', eligible: 2, ready: 1, best: 70 },
+    { label: 'monthly', eligible: 1, ready: 1, best: 100 }
+  ]);
+  assert.equal('total' in summary, false);
+  assert.equal('average' in summary, false);
 });

@@ -128,14 +128,18 @@ missing executables fail without falling back to shell interpolation.
 ## The Accounts Panel
 
 The panel lists Codex subscriptions and Claude accounts in two labelled sections, each with its own
-cards, usage bars and pooled total. Nothing is pooled across the two — the quotas are not the same
-currency, and switching one has no effect on the other.
+cards and usage bars. The section header reports readiness counts and groups comparable returned
+windows, such as five-hour, weekly, and monthly limits. It does not sum percentages: limits from
+different accounts, plans, and reset periods are not one interchangeable pool.
 
 Each card shows the plan, masked email, and **one labelled bar per limit window** — a five-hour and
 a weekly bar for Claude, whichever Codex reports for a subscription — each with its own colour and
 its own reset. The percentage beside the name is the tightest window, the one that will stop you
 first. Hovering reveals a pencil to rename; renaming changes the label only, never the directory
-holding the credential, so it cannot invalidate a login.
+holding the credential, so it cannot invalidate a login. The plan badge uses the newest provider
+observation available and successful usage reads reconcile the stored non-secret plan metadata.
+The **Suggested** account is selected by sign-in and quota health first, then known plan capability,
+then remaining quota; it is not a model-availability guarantee.
 
 Codex cards show **banked resets** when OpenAI reports any, including the earliest known expiry.
 **Use reset** opens a modal confirmation, asks the backend to consume one reset, and refreshes that

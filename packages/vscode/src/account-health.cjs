@@ -40,6 +40,10 @@ function recommendAccount(rows, options = {}) {
         return right.health.selectionRank - left.health.selectionRank;
       }
 
+      const leftCapability = planCapabilityRank(left.row.plan);
+      const rightCapability = planCapabilityRank(right.row.plan);
+      if (leftCapability !== rightCapability) return rightCapability - leftCapability;
+
       const leftRemaining = finiteRemaining(left.row.remaining);
       const rightRemaining = finiteRemaining(right.row.remaining);
       if (leftRemaining !== rightRemaining) return rightRemaining - leftRemaining;
@@ -47,6 +51,18 @@ function recommendAccount(rows, options = {}) {
       return String(left.row.id || '').localeCompare(String(right.row.id || ''));
     });
   return candidates[0]?.row;
+}
+
+function planCapabilityRank(plan) {
+  const value = String(plan || '').toLowerCase();
+  if (!value) return 0;
+  const words = new Set(value.split(/[^a-z0-9]+/).filter(Boolean));
+  if (['enterprise', 'business', 'team', 'edu', 'max'].some((word) => words.has(word))) return 5;
+  if (words.has('pro')) return 4;
+  if (words.has('plus')) return 3;
+  if (words.has('go')) return 2;
+  if (words.has('free')) return 1;
+  return 0;
 }
 
 function finiteRemaining(value) {
@@ -57,5 +73,6 @@ module.exports = {
   DEFAULT_USAGE_STALE_MS,
   HEALTH,
   classifyAccountHealth,
-  recommendAccount
+  recommendAccount,
+  planCapabilityRank
 };

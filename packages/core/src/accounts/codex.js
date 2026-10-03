@@ -86,9 +86,10 @@ export async function importCodexAuth(accountId, sourceHome, options = {}) {
   await copyCredential(source, codexAuthPath(target));
 
   const auth = await readCodexAuth(target);
+  const signedInAt = new Date().toISOString();
   await updateAccount(
     accountId,
-    { email: auth?.claims?.email, plan: auth?.claims?.plan, signedInAt: new Date().toISOString() },
+    identityPatch(auth, { signedInAt }),
     options
   );
   return auth;
@@ -232,7 +233,8 @@ export async function ensureCodexAccessToken(accountId, options = {}) {
 
   const tokens = await refreshCodexToken(auth.refreshToken, options);
   const updated = await writeCodexTokens(home, tokens, options);
-  await updateAccount(accountId, { lastRefreshedAt: new Date().toISOString() }, options).catch(() => {});
+  const lastRefreshedAt = new Date().toISOString();
+  await updateAccount(accountId, identityPatch(updated, { lastRefreshedAt })).catch(() => {});
   return updated;
 }
 
@@ -377,12 +379,23 @@ export async function importCodexAuthText(accountId, text, options = {}) {
 export async function refreshCodexAccountIdentity(accountId, options = {}) {
   const auth = await readCodexAuth(codexHome(accountId, options));
   if (!auth?.accessToken) return null;
+  const signedInAt = new Date().toISOString();
   await updateAccount(
     accountId,
-    { email: auth.claims?.email, plan: auth.claims?.plan, signedInAt: new Date().toISOString() },
+    identityPatch(auth, { signedInAt }),
     options
   );
   return auth;
+}
+
+function identityPatch(auth, timestamps = {}) {
+  const patch = { ...timestamps };
+  if (auth?.claims?.email) patch.email = auth.claims.email;
+  if (auth?.claims?.plan) {
+    patch.plan = auth.claims.plan;
+    patch.planUpdatedAt = timestamps.signedInAt || timestamps.lastRefreshedAt || new Date().toISOString();
+  }
+  return patch;
 }
 
 // Which registered account the official Codex CLI and VS Code extension are

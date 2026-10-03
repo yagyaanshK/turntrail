@@ -855,6 +855,63 @@ test('quota reads come from cache until the TTL expires', async () => {
   assert.equal(calls, 2, 'force refreshes regardless of age');
 });
 
+test('a fresh quota read reconciles changed plan metadata without changing the credential', async () => {
+  const { options } = await sandbox();
+  const account = await createAccount({ label: 'Downgraded', provider: 'codex' }, options);
+  await signIn(account.id, options, { accessToken: 'keep-this-token', plan: 'plus' });
+  await updateAccount(account.id, { plan: 'plus' }, options);
+
+  const usage = await getCodexUsage(account.id, {
+    ...options,
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        plan_type: 'free',
+        rate_limit: {
+          primary_window: { used_percent: 0, limit_window_seconds: 2592000 }
+        }
+      })
+    })
+  });
+
+  const stored = await getAccount(account.id, options);
+  assert.equal(usage.plan, 'free');
+  assert.equal(usage.fromCache, false);
+  assert.equal(stored.plan, 'free');
+  assert.equal(stored.planUpdatedAt, usage.fetchedAt);
+  assert.equal((await readCodexAuth(codexHome(account.id, options))).accessToken, 'keep-this-token');
+});
+
+test('a failed quota refresh cannot overwrite newer stored plan metadata', async () => {
+  const { options } = await sandbox();
+  const account = await createAccount({ label: 'No downgrade on failure', provider: 'codex' }, options);
+  await signIn(account.id, options);
+
+  await getCodexUsage(account.id, {
+    ...options,
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        plan_type: 'free',
+        rate_limit: { primary_window: { used_percent: 20, limit_window_seconds: 2592000 } }
+      })
+    })
+  });
+  await updateAccount(account.id, {
+    plan: 'plus',
+    planUpdatedAt: new Date(Date.now() + 60_000).toISOString()
+  }, options);
+
+  const degraded = await getCodexUsage(account.id, {
+    ...options,
+    force: true,
+    fetch: async () => ({ ok: false, status: 429, statusText: 'Too Many Requests' })
+  });
+
+  assert.equal(degraded.fromCache, true);
+  assert.equal((await getAccount(account.id, options)).plan, 'plus');
+});
+
 test('a failed refresh keeps the last good reading instead of blanking the panel', async () => {
   const { options } = await sandbox();
   const account = await createAccount({ label: 'Flaky', provider: 'codex' }, options);

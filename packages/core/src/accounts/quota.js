@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ensureDir, pathExists, readJson, writeJson } from '../fs-utils.js';
-import { accountDir } from './store.js';
+import { accountDir, getAccount, updateAccount } from './store.js';
 import { ensureCodexAccessToken } from './codex.js';
 import { ensureClaudeAccessToken } from './claude.js';
 import { claudeApiHeaders } from './claude-oauth.js';
@@ -160,11 +160,32 @@ export async function getCodexUsage(accountId, options = {}) {
   // active account is left for Codex to refresh. A caller can still override
   // refreshSkewMs.
   const read = (id, opts) => ensureCodexAccessToken(id, { refreshSkewMs: CODEX_PROACTIVE_REFRESH_MS, ...opts });
-  return getUsage(accountId, read, fetchCodexUsage, options);
+  const usage = await getUsage(accountId, read, fetchCodexUsage, options);
+  await reconcileUsagePlan(accountId, usage, options);
+  return usage;
 }
 
 export async function getClaudeUsage(accountId, options = {}) {
-  return getUsage(accountId, ensureClaudeAccessToken, fetchClaudeUsage, options);
+  const usage = await getUsage(accountId, ensureClaudeAccessToken, fetchClaudeUsage, options);
+  await reconcileUsagePlan(accountId, usage, options);
+  return usage;
+}
+
+async function reconcileUsagePlan(accountId, usage, options = {}) {
+  const plan = typeof usage?.plan === 'string' ? usage.plan.trim() : '';
+  if (!plan || usage.fromCache) return;
+
+  try {
+    const account = await getAccount(accountId, options);
+    if (!account || (account.plan === plan && account.planUpdatedAt)) return;
+    await updateAccount(accountId, {
+      plan,
+      planUpdatedAt: usage.fetchedAt || new Date().toISOString()
+    }, options);
+  } catch {
+    // Quota is still useful when optional registry metadata cannot be updated.
+    // A later successful network read will try the reconciliation again.
+  }
 }
 
 export async function fetchClaudeUsage(auth, options = {}) {

@@ -95,6 +95,9 @@ test('the accounts panel is told the maintenance state so it can show the switch
   });
   const { view, posted } = fakeView();
   await panel.resolveWebviewView(view);
+  assert.match(view.webview.html, /Account readiness/);
+  assert.match(view.webview.html, /Suggested:/);
+  assert.doesNotMatch(view.webview.html, /pooled\.total/);
   assert.match(view.webview.html, /limit\.description \|\| 'Separate allowance'/);
   assert.match(view.webview.html, /authenticationFailure/);
   assert.match(view.webview.html, /Sign in again/);
