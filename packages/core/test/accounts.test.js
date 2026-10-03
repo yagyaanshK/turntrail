@@ -900,6 +900,10 @@ test('a Codex 401 marks a cached credential as requiring revalidation', async ()
   assert.equal(rejected.requiresSignIn, false);
   assert.equal(rejected.requiresRevalidation, true);
   assert.match(rejected.staleReason, /verify the login/i);
+
+  const offline = await getCodexUsage(account.id, { ...options, offline: true });
+  assert.equal(offline.authenticationFailure, 'AUTH_REJECTED');
+  assert.equal(offline.requiresRevalidation, true, 'confirmed authentication state survives an extension reload');
 });
 
 test('quota for an account with no login reports that rather than erroring', async () => {

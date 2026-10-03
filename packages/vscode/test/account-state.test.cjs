@@ -44,6 +44,7 @@ test('account health distinguishes authentication, quota, and stale evidence', (
   const fresh = '2026-09-07T11:59:00.000Z';
   assert.equal(classifyAccountHealth({ signedIn: false }, { now }).id, 'needs-sign-in');
   assert.equal(classifyAccountHealth({ signedIn: true, requiresRevalidation: true }, { now }).id, 'needs-verification');
+  assert.equal(classifyAccountHealth({ signedIn: true, usageAccessFailure: 'USAGE_PERMISSION_DENIED' }, { now }).id, 'subscription-unavailable');
   assert.equal(classifyAccountHealth({ signedIn: true, limitReached: true, remaining: 80 }, { now }).id, 'limit-reached');
   assert.equal(classifyAccountHealth({ signedIn: true, remaining: 12, fetchedAt: fresh }, { now }).id, 'low-quota');
   assert.equal(classifyAccountHealth({ signedIn: true, remaining: 70, fetchedAt: fresh }, { now }).id, 'healthy');
@@ -96,6 +97,32 @@ test('the account store records only coded authentication failures', async () =>
   assert.equal(row.signedIn, false);
   assert.equal(row.health.id, 'needs-sign-in');
   assert.deepEqual(row.windows, []);
+});
+
+test('a Claude usage permission failure is presented as an unavailable subscription', async () => {
+  const account = { id: 'claude-ended', provider: 'claude', label: 'Ended plan' };
+  const api = {
+    listAccounts: async ({ provider } = {}) => provider === 'claude' ? [account] : [],
+    activeCodexAccountId: async () => undefined,
+    activeClaudeAccountId: async () => undefined,
+    isSignedIn: async () => false,
+    isClaudeSignedIn: async () => true,
+    resumesAt: () => undefined
+  };
+  const store = new AccountsStore(async () => api);
+  store.usage.set(account.id, {
+    accountId: account.id,
+    usageAccessFailure: 'USAGE_PERMISSION_DENIED',
+    error: 'Claude denied access to subscription usage.',
+    fetchedAt: new Date().toISOString(),
+    windows: []
+  });
+
+  const row = (await store.viewModel()).sections.find((section) => section.id === 'claude').rows[0];
+  assert.equal(row.signedIn, true);
+  assert.equal(row.health.id, 'subscription-unavailable');
+  assert.equal(row.remaining, undefined);
+  assert.equal(row.recommended, false);
 });
 
 test('the account store refreshes stale usage without polling fresh accounts', async () => {

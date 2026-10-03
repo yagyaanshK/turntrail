@@ -82,17 +82,7 @@ async function getUsage(accountId, read, fetchUsage, options = {}) {
     auth = await read(accountId, options);
   } catch (error) {
     // Renewing an expired login is part of reading it, and can fail on its own.
-    const authentication = authenticationState(error);
-    if (cached) {
-      return { ...cached, fromCache: true, staleReason: error.message, ...authentication };
-    }
-    return {
-      accountId,
-      error: error.message,
-      ...authentication,
-      fetchedAt: new Date().toISOString(),
-      windows: []
-    };
+    return usageFailure(accountId, cached, error, options);
   }
 
   if (!auth?.accessToken) {
@@ -111,29 +101,57 @@ async function getUsage(accountId, read, fetchUsage, options = {}) {
   } catch (error) {
     // A failed refresh must not discard a good previous reading - the panel is
     // more useful showing a stale number with its age than showing nothing.
-    const authentication = authenticationState(error);
-    if (cached) {
-      return { ...cached, fromCache: true, staleReason: error.message, ...authentication };
-    }
-    return {
-      accountId,
-      error: error.message,
-      ...authentication,
-      fetchedAt: new Date().toISOString(),
-      windows: []
-    };
+    return usageFailure(accountId, cached, error, options);
   }
 }
 
-function authenticationState(error) {
+async function usageFailure(accountId, cached, error, options = {}) {
+  const state = failureState(error);
+  const result = cached
+    ? { ...cached, fromCache: true, staleReason: error.message, ...state }
+    : {
+        accountId,
+        error: error.message,
+        ...state,
+        fetchedAt: new Date().toISOString(),
+        windows: []
+      };
+
+  // Confirmed authentication and entitlement failures must survive an offline
+  // reload of the extension. Persist only our bounded status codes and safe,
+  // user-facing message; provider response bodies never enter this cache.
+  if (state.authenticationFailure || state.usageAccessFailure) {
+    result.statusCheckedAt = new Date().toISOString();
+    await writeQuotaCache(accountId, withoutRuntimeFields(result), options);
+  }
+  return result;
+}
+
+function failureState(error) {
   const authenticationFailure = error?.code === 'AUTH_EXPIRED' || error?.code === 'AUTH_REJECTED'
     ? error.code
     : undefined;
-  return {
+  if (authenticationFailure) return {
     authenticationFailure,
     requiresSignIn: authenticationFailure === 'AUTH_EXPIRED',
     requiresRevalidation: authenticationFailure === 'AUTH_REJECTED'
   };
+  if (error?.code === 'USAGE_PERMISSION_DENIED') {
+    return { usageAccessFailure: 'USAGE_PERMISSION_DENIED' };
+  }
+  return {};
+}
+
+function withoutRuntimeFields(usage) {
+  const { fromCache, ...persisted } = usage;
+  return persisted;
+}
+
+export async function recordAuthenticationFailure(accountId, failure, options = {}) {
+  const error = new Error(failure?.message || failure?.error || 'Authentication failed.');
+  error.code = failure?.code;
+  if (!failureState(error).authenticationFailure) return null;
+  return usageFailure(accountId, await readQuotaCache(accountId, options), error, options);
 }
 
 export async function getCodexUsage(accountId, options = {}) {
@@ -154,9 +172,16 @@ export async function fetchClaudeUsage(auth, options = {}) {
     headers: claudeApiHeaders(auth.accessToken, options)
   }, options);
   if (!response.ok) {
-    if (response.status === 401) {
+    const payload = await readOptionalResponseJson(response);
+    const errorType = String(payload?.error?.type || payload?.type || '');
+    if (response.status === 401 || errorType === 'authentication_error') {
       const error = new Error('Claude rejected this access token. Turntrail will try its saved refresh token; sign in again if renewal fails.');
       error.code = 'AUTH_REJECTED';
+      throw error;
+    }
+    if (response.status === 403 && errorType === 'permission_error') {
+      const error = new Error('Claude denied access to subscription usage. The login is valid, but its Pro, Max, Team, or Enterprise entitlement may be inactive.');
+      error.code = 'USAGE_PERMISSION_DENIED';
       throw error;
     }
     throw new Error(`Usage request failed: ${response.status} ${response.statusText || ''}`.trim());
@@ -372,6 +397,14 @@ async function readResponseJson(response, provider, operation) {
     return await response.json();
   } catch {
     throw new ProviderContractError(provider, operation);
+  }
+}
+
+async function readOptionalResponseJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
   }
 }
 

@@ -748,6 +748,56 @@ test('a Claude 401 marks the login as requiring revalidation', async () => {
   assert.equal(rejected.requiresSignIn, false);
   assert.equal(rejected.requiresRevalidation, true);
   assert.match(rejected.error, /saved refresh token/i);
+
+  const offline = await getClaudeUsage(account.id, { ...options, offline: true });
+  assert.equal(offline.authenticationFailure, 'AUTH_REJECTED');
+  assert.equal(offline.requiresRevalidation, true, 'confirmed authentication state survives an extension reload');
+});
+
+test('a successful Claude read clears a persisted authentication failure', async () => {
+  const { options } = await sandbox();
+  const account = await createAccount({ label: 'Recovered', provider: 'claude' }, options);
+  await signIn(account.id, options);
+
+  await getClaudeUsage(account.id, {
+    ...options,
+    force: true,
+    fetch: async () => ({ ok: false, status: 401, statusText: 'Unauthorized' })
+  });
+  const recovered = await getClaudeUsage(account.id, {
+    ...options,
+    force: true,
+    fetch: async () => ({ ok: true, status: 200, json: async () => LIVE_USAGE })
+  });
+
+  assert.equal(recovered.authenticationFailure, undefined);
+  assert.equal(recovered.requiresRevalidation, undefined);
+  const offline = await getClaudeUsage(account.id, { ...options, offline: true });
+  assert.equal(offline.authenticationFailure, undefined);
+  assert.equal(offline.windows.length, 2);
+});
+
+test('a Claude permission error is retained as subscription access failure, not expired authentication', async () => {
+  const { options } = await sandbox();
+  const account = await createAccount({ label: 'Ended plan', provider: 'claude' }, options);
+  await signIn(account.id, options);
+
+  const denied = await getClaudeUsage(account.id, {
+    ...options,
+    force: true,
+    fetch: async () => ({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      json: async () => ({ type: 'error', error: { type: 'permission_error', message: 'Not permitted' } })
+    })
+  });
+
+  assert.equal(denied.usageAccessFailure, 'USAGE_PERMISSION_DENIED');
+  assert.equal(denied.authenticationFailure, undefined);
+  assert.equal(denied.requiresSignIn, undefined);
+  const offline = await getClaudeUsage(account.id, { ...options, offline: true });
+  assert.equal(offline.usageAccessFailure, 'USAGE_PERMISSION_DENIED');
 });
 
 // --- the loopback callback --------------------------------------------------

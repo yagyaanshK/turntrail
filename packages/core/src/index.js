@@ -135,6 +135,7 @@ export {
   getCodexUsage,
   consumeCodexResetCredit,
   clearQuotaCache,
+  recordAuthenticationFailure,
   headlineRemaining,
   nextResetAt,
   resumesAt,

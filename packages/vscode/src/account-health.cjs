@@ -7,6 +7,7 @@ const HEALTH = Object.freeze({
   stale: { id: 'usage-stale', label: 'Usage stale', tone: 'warn', selectionRank: 1 },
   unavailable: { id: 'usage-unavailable', label: 'Usage unavailable', tone: 'warn', selectionRank: 1 },
   exhausted: { id: 'limit-reached', label: 'Limit reached', tone: 'crit', selectionRank: 0 },
+  subscription: { id: 'subscription-unavailable', label: 'Subscription unavailable', tone: 'crit', selectionRank: 0 },
   verification: { id: 'needs-verification', label: 'Verification required', tone: 'crit', selectionRank: 0 },
   signin: { id: 'needs-sign-in', label: 'Sign in required', tone: 'crit', selectionRank: 0 }
 });
@@ -14,6 +15,7 @@ const HEALTH = Object.freeze({
 function classifyAccountHealth(row, options = {}) {
   if (row?.requiresRevalidation) return HEALTH.verification;
   if (row?.requiresSignIn || !row?.signedIn) return HEALTH.signin;
+  if (row?.usageAccessFailure) return HEALTH.subscription;
   if (row?.limitReached || row?.remaining === 0) return HEALTH.exhausted;
 
   const now = Number.isFinite(options.now) ? options.now : Date.now();

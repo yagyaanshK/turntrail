@@ -113,7 +113,11 @@ class AccountsStore {
     const code = failure?.code;
     if (code !== 'AUTH_EXPIRED' && code !== 'AUTH_REJECTED') return false;
 
-    const current = this.usage.get(accountId) || { accountId, windows: [] };
+    const api = await this.core();
+    const persisted = typeof api.recordAuthenticationFailure === 'function'
+      ? await api.recordAuthenticationFailure(accountId, failure)
+      : undefined;
+    const current = persisted || this.usage.get(accountId) || { accountId, windows: [] };
     this.usage.set(accountId, {
       ...current,
       accountId,
@@ -172,8 +176,14 @@ class AccountsStore {
     const requiresSignIn = usage?.requiresSignIn === true;
     const requiresRevalidation = usage?.requiresRevalidation === true;
     const hasAuthenticationIssue = requiresSignIn || requiresRevalidation;
-    const windows = hasAuthenticationIssue ? [] : (usage?.windows || []);
-    const needsActivation = loginNeedsUpdate(account, this.activeIds[provider.id], hasAuthenticationIssue);
+    const usageAccessFailure = usage?.usageAccessFailure;
+    const hasUsageAccessIssue = Boolean(usageAccessFailure);
+    const windows = hasAuthenticationIssue || hasUsageAccessIssue ? [] : (usage?.windows || []);
+    const needsActivation = loginNeedsUpdate(
+      account,
+      this.activeIds[provider.id],
+      hasAuthenticationIssue || hasUsageAccessIssue
+    );
     const row = {
       id: account.id,
       provider: provider.id,
@@ -187,11 +197,12 @@ class AccountsStore {
       requiresRevalidation,
       authenticationFailure: usage?.authenticationFailure,
       authenticationFailureLabel: authenticationFailureLabel(usage?.authenticationFailure),
+      usageAccessFailure,
       error: usage?.error === 'not-signed-in' ? undefined : usage?.error,
-      limitReached: !hasAuthenticationIssue && Boolean(usage?.limitReached),
-      credits: hasAuthenticationIssue ? undefined : usage?.credits,
-      resetCredits: provider.id === 'codex' && !hasAuthenticationIssue ? usage?.resetCredits : undefined,
-      remaining: hasAuthenticationIssue ? undefined : remainingOf(usage),
+      limitReached: !hasAuthenticationIssue && !hasUsageAccessIssue && Boolean(usage?.limitReached),
+      credits: hasAuthenticationIssue || hasUsageAccessIssue ? undefined : usage?.credits,
+      resetCredits: provider.id === 'codex' && !hasAuthenticationIssue && !hasUsageAccessIssue ? usage?.resetCredits : undefined,
+      remaining: hasAuthenticationIssue || hasUsageAccessIssue ? undefined : remainingOf(usage),
       resetsAt: nextReset(windows),
       // When a blocked account starts working again, which is not the same as
       // its next reset - see resumesAt() in core.
@@ -204,7 +215,7 @@ class AccountsStore {
         remaining: window.remainingPercent,
         resetsAt: window.resetsAt
       })),
-      additionalLimits: (hasAuthenticationIssue ? [] : (usage?.additionalLimits || [])).map((limit) => ({
+      additionalLimits: (hasAuthenticationIssue || hasUsageAccessIssue ? [] : (usage?.additionalLimits || [])).map((limit) => ({
         id: limit.id,
         label: limit.label,
         description: limit.description,
@@ -759,6 +770,9 @@ function renderRow(row) {
   let status;
   if (row.needsActivation) status = 'New sign-in ready';
   else if (row.authenticationFailureLabel) status = esc(row.authenticationFailureLabel);
+  else if (row.usageAccessFailure === 'USAGE_PERMISSION_DENIED') {
+    status = 'Claude denied access to subscription usage (USAGE_PERMISSION_DENIED)';
+  }
   else if (row.requiresRevalidation) status = row.active ? 'Selected login needs repair' : 'Login needs verification';
   else if (!row.signedIn) status = row.active ? 'Selected login needs sign-in' : 'Not signed in';
   else if (row.error) status = esc(row.error);
@@ -785,6 +799,7 @@ function renderRow(row) {
     : '';
   const resetCredits = renderResetCredits(row);
   const authenticationFailure = row.requiresSignIn || row.requiresRevalidation;
+  const usageAccessFailure = Boolean(row.usageAccessFailure);
 
   const act = (action, text, cls) =>
     '<button class="' + (cls || '') + '" data-act="' + action + '" data-id="' + id +
@@ -825,7 +840,9 @@ function renderRow(row) {
     '<div class="actions">' +
       (authenticationFailure
         ? act('signin', 'Sign in again', 'primary')
-        : (row.needsActivation
+        : (usageAccessFailure
+            ? ''
+            : row.needsActivation
             ? act('switch', 'Update ' + (row.provider === 'claude' ? 'Claude' : 'Codex') + ' login', 'primary')
             : (row.active || !row.signedIn ? '' : act('switch', 'Use this', 'primary')))) +
       (authenticationFailure || row.signedIn ? '' : act('signin', 'Sign in', 'primary')) +

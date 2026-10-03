@@ -212,7 +212,7 @@ class LoginPanel {
   }
 
   async adopt(text, signal) {
-    const { importCodexAuthText, importClaudeAuthText, backfillClaudeProfile } = await this.core();
+    const { importCodexAuthText, importClaudeAuthText, backfillClaudeProfile, clearQuotaCache } = await this.core();
     const accountId = await this.ensureAccount();
     const claude = this.provider === 'claude';
 
@@ -229,6 +229,8 @@ class LoginPanel {
       return auth;
     })) || auth;
 
+    await clearQuotaCache(accountId);
+    this.store.usage.delete(accountId);
     await this.store.reloadUsage({ force: true, signal });
     this.commitProvisional();
     this.post({ type: 'done', method: 'paste', email: auth.claims?.email || auth.email, label: this.target.label });
@@ -273,7 +275,7 @@ class LoginPanel {
   }
 
   async importClaudeCurrent(signal) {
-    const { importClaudeAuth, defaultClaudeHome, backfillClaudeProfile, updateAccount } = await this.core();
+    const { importClaudeAuth, defaultClaudeHome, backfillClaudeProfile, updateAccount, clearQuotaCache } = await this.core();
     const accountId = await this.ensureAccount();
     this.post({ type: 'running', method: 'import' });
 
@@ -289,6 +291,8 @@ class LoginPanel {
     // the same file.
     await updateAccount(accountId, { lastUsedAt: new Date().toISOString() });
 
+    await clearQuotaCache(accountId);
+    this.store.usage.delete(accountId);
     await this.store.reloadUsage({ force: true, signal });
     this.commitProvisional();
     this.post({ type: 'done', method: 'import', email: auth.email, label: this.target.label });
@@ -372,7 +376,7 @@ class LoginPanel {
   }
 
   async finishClaude(accountId, method, exchange, signal) {
-    const { exchangeClaudeCode, fetchClaudeProfile, writeClaudeCredential } = await this.core();
+    const { exchangeClaudeCode, fetchClaudeProfile, writeClaudeCredential, clearQuotaCache } = await this.core();
 
     const tokens = await exchangeClaudeCode({ ...exchange, signal });
     // The token response says nothing about the person, so the card would be
@@ -384,6 +388,8 @@ class LoginPanel {
     });
     const auth = await writeClaudeCredential(accountId, tokens, profile);
 
+    await clearQuotaCache(accountId);
+    this.store.usage.delete(accountId);
     await this.store.reloadUsage({ force: true, signal });
     this.commitProvisional();
     this.post({
@@ -399,7 +405,7 @@ class LoginPanel {
   // -------------------------------------------------------------------------
 
   async startCodex(message, signal) {
-    const { codexHome, refreshCodexAccountIdentity, codexLoginArgs } = await this.core();
+    const { codexHome, refreshCodexAccountIdentity, codexLoginArgs, clearQuotaCache } = await this.core();
 
     if (this.child) throw new Error('A sign-in is already running. Cancel it first.');
 
@@ -419,6 +425,8 @@ class LoginPanel {
     }
 
     if (signal.aborted) throw new Error('Sign-in cancelled.');
+    await clearQuotaCache(accountId);
+    this.store.usage.delete(accountId);
     await this.store.reloadUsage({ force: true, signal });
     this.commitProvisional();
     this.post({ type: 'done', method, email: auth.claims?.email, label: this.target.label });
