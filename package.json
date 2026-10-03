@@ -1,7 +1,7 @@
 {
   "name": "turntrail-workspace",
   "private": true,
-  "version": "0.18.8",
+  "version": "0.18.9",
   "description": "Vendor-neutral handoff layer for continuing developer agent sessions across Codex, Claude, and other tools.",
   "type": "module",
   "workspaces": [
@@ -28,7 +28,7 @@
   "license": "MIT",
   "devDependencies": {
     "@vscode/test-electron": "^3.1.0",
-    "@vscode/vsce": "^3.9.2",
+    "@vscode/vsce": "^4.0.0",
     "chrome-remote-interface": "^0.33.3"
   }
 }
