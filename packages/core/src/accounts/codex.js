@@ -218,7 +218,14 @@ export async function ensureCodexAccessToken(accountId, options = {}) {
   const skew = Number.isFinite(options.refreshSkewMs) ? options.refreshSkewMs : EXPIRY_SKEW_MS;
   const fresh = !Number.isFinite(expiresAt) || expiresAt - skew > Date.now();
   if ((fresh && !options.forceRefresh) || options.offline) return auth;
-  if (!auth.refreshToken) return auth;
+  if (!auth.refreshToken) {
+    if (Number.isFinite(expiresAt) && expiresAt - EXPIRY_SKEW_MS <= Date.now()) {
+      const error = new Error('This Codex login has expired and has no refresh token. Sign in again.');
+      error.code = 'AUTH_EXPIRED';
+      throw error;
+    }
+    return auth;
+  }
 
   // Refreshing the live account would race Codex for its rotating token.
   if (!options.allowActiveRefresh && (await isActiveCodexAccount(accountId, options))) return auth;

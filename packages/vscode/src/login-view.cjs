@@ -645,7 +645,7 @@ function claudeCards() {
     <section class="card" data-method="code">
       <button class="method" data-open="code">
         <span class="glyph">⌗</span>
-        <span><b>Paste code here if prompted</b><span>No local port; approve anywhere and paste the code shown</span></span>
+        <span><b>Sign in using Authentication Code</b><span>No local port; approve anywhere and paste the code shown</span></span>
         <span class="chev">▾</span>
       </button>
       <div class="body" hidden>

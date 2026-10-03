@@ -101,6 +101,30 @@ test('a reused or revoked refresh token asks for a fresh sign-in, not a retry', 
   );
 });
 
+test('the structured invalid-refresh-token response is a confirmed expired login', async () => {
+  await assert.rejects(
+    refreshCodexToken('rt.invalid', {
+      fetch: errFetch(401, {
+        error: {
+          message: 'The refresh token is invalid.',
+          type: 'invalid_request_error',
+          param: null,
+          code: 'invalid_refresh_token'
+        }
+      })
+    }),
+    (error) => error.code === 'AUTH_EXPIRED' &&
+      /sign in again/i.test(error.message) && !/objectObject/i.test(error.message)
+  );
+});
+
+test('a missing Codex refresh token is a confirmed expired login', async () => {
+  await assert.rejects(
+    refreshCodexToken('', { fetch: failIfCalled }),
+    (error) => error.code === 'AUTH_EXPIRED' && /sign in again/i.test(error.message)
+  );
+});
+
 test('Codex OAuth errors never expose provider response details', async () => {
   const secret = 'sk-provider-secret-that-must-not-leak';
   await assert.rejects(
@@ -132,6 +156,17 @@ test('an expired idle account is refreshed and its rotated token written back', 
   assert.equal(auth.refreshToken, 'rt.rotated', 'the rotated token must replace the old one on disk');
   const onDisk = await readCodexAuth(codexHome(account.id, options));
   assert.equal(onDisk.refreshToken, 'rt.rotated', 'and it must be persisted, not only returned');
+});
+
+test('an expired access token with no refresh token requires sign-in again', async () => {
+  const options = await sandbox();
+  const account = await createAccount({ label: 'Expired', provider: 'codex' }, options);
+  await signIn(account.id, options, { access: accessToken(past()), refresh: undefined });
+
+  await assert.rejects(
+    ensureCodexAccessToken(account.id, { ...options, fetch: failIfCalled }),
+    (error) => error.code === 'AUTH_EXPIRED' && /sign in again/i.test(error.message)
+  );
 });
 
 test('the active account is never refreshed here - Codex owns its rotating token', async () => {

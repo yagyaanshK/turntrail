@@ -24,7 +24,9 @@ export const CODEX_CLIENT_ID = PROVIDER_CONTRACTS.codex.oauth.clientId;
 
 export async function refreshCodexToken(refreshToken, options = {}) {
   if (!refreshToken) {
-    throw new Error('This account has no refresh token, so its login cannot be renewed. Sign in again.');
+    const error = new Error('This account has no refresh token, so its login cannot be renewed. Sign in again.');
+    error.code = 'AUTH_EXPIRED';
+    throw error;
   }
   // The endpoint takes a JSON body, unlike Anthropic's form-encoded one.
   const response = await providerFetch(options.tokenUrl || CODEX_TOKEN_URL, {
@@ -67,8 +69,7 @@ export async function refreshCodexToken(refreshToken, options = {}) {
 // fix is different: not "try again" but "sign in again", and it is usually the
 // symptom of two things having refreshed the same account.
 function codexOauthError(payload, status, text) {
-  const code = payload?.error || payload?.code;
-  const detail = payload?.error_description || payload?.message || '';
+  const { code } = codexErrorFields(payload);
   if (isExpiredLogin(payload, text)) {
     return 'This login has expired or was renewed elsewhere and cannot be refreshed. Sign in again.';
   }
@@ -77,9 +78,17 @@ function codexOauthError(payload, status, text) {
 }
 
 function isExpiredLogin(payload, text) {
-  const code = payload?.error || payload?.code;
-  const detail = payload?.error_description || payload?.message || '';
-  return code === 'invalid_grant' || /reuse|already been used|revoked|expired/i.test(`${code} ${detail} ${text}`);
+  const { code, detail } = codexErrorFields(payload);
+  return code === 'invalid_grant' || code === 'invalid_refresh_token' || code === 'refresh_token_reused' ||
+    /reuse|already been used|revoked|expired|invalid refresh token/i.test(`${code} ${detail} ${text}`);
+}
+
+function codexErrorFields(payload) {
+  const nested = payload?.error && typeof payload.error === 'object' ? payload.error : undefined;
+  return {
+    code: nested?.code || nested?.type || payload?.error || payload?.code,
+    detail: nested?.message || payload?.error_description || payload?.message || ''
+  };
 }
 
 function safeErrorCode(value) {

@@ -79,7 +79,8 @@ test('provider sign-in links can be copied with method-scoped feedback', async (
 test('Claude code flow uses recognizable wording and explains remote authorization', async () => {
   const panel = new LoginPanel({}, async () => ({}), {});
   await panel.open({ provider: 'claude', label: 'Test' });
-  assert.match(createdPanel.webview.html, /Paste code here if prompted/);
+  assert.match(createdPanel.webview.html, /Sign in using Authentication Code/);
+  assert.match(createdPanel.webview.html, /<label for="authCode">Paste code here if prompted<\/label>/);
   assert.match(createdPanel.webview.html, /Paste the code shown after approval/);
   assert.doesNotMatch(createdPanel.webview.html, /placeholder="code#state"/);
   assert.match(createdPanel.webview.html, /HTTPS link, not a localhost link/);
