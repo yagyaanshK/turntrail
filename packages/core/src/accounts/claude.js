@@ -6,6 +6,7 @@ import { accountDir, listAccounts, updateAccount } from './store.js';
 import { fetchClaudeProfile, refreshClaudeToken } from './claude-oauth.js';
 import { isProviderContractError, validateClaudeCredentialPayload } from './provider-contracts.js';
 import { assertAgentStopped } from './processes.js';
+import { carryClaudeRetention } from './claude-settings.js';
 
 export const CLAUDE_PROVIDER = 'claude';
 export const CLAUDE_PROACTIVE_REFRESH_MS = 4 * 60 * 60 * 1000;
@@ -44,6 +45,15 @@ export function claudeConfigPath(home, options = {}) {
 export async function ensureClaudeHome(accountId, options = {}) {
   const home = claudeHome(accountId, options);
   await ensureDir(home);
+  // Every launch as this account goes through here, and Claude reads its
+  // settings from this directory alone. Carrying the user's chat retention in
+  // keeps those chats from being swept after the 30-day default. It is a
+  // protection, never a precondition, so a failure here blocks nothing.
+  try {
+    await carryClaudeRetention(accountId, options);
+  } catch {
+    // Retention is reported in the Accounts panel; the launch goes ahead.
+  }
   return home;
 }
 

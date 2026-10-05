@@ -288,6 +288,20 @@ Claude's layout has one asymmetry worth knowing, because it is easy to get backw
 file sits *beside* the stock `~/.claude` home, at `~/.claude.json`, but moves *inside* any custom
 `CLAUDE_CONFIG_DIR`. The email the client displays lives in that config, not in the credential.
 
+### Chat retention
+
+Claude Code deletes a chat transcript after 30 idle days unless `cleanupPeriodDays` in its
+`settings.json` says otherwise, and an account's `CLAUDE_CONFIG_DIR` is read instead of
+`~/.claude`, settings included. Switching never touches `settings.json`. So that chats started as a
+managed account are not swept on the 30-day default, Turntrail copies your `cleanupPeriodDays` into
+each account's directory whenever it prepares one; a longer value already there is kept, and only
+that one key is copied. When the setting is missing altogether, the Claude section of the Accounts
+panel says so and offers **Keep chats for 10 years**, which adds `"cleanupPeriodDays": 3650` to
+`~/.claude/settings.json`, leaves every other setting alone, and saves a backup first. A value set
+in Claude's machine-wide `managed-settings.json` (`C:\Program Files\ClaudeCode\` on Windows,
+`/Library/Application Support/ClaudeCode/` on macOS, `/etc/claude-code/` on Linux) applies to every
+directory at once and is recognised as set.
+
 ### Signing in
 
 Every method is a card in the sign-in panel that expands in place, so one that will not work can be

@@ -80,6 +80,7 @@
     "onCommand:turntrail.createHandoff",
     "onCommand:turntrail.toggleAccountMaintenance",
     "onCommand:turntrail.runAccountMaintenance",
+    "onCommand:turntrail.keepClaudeChats",
     "onCommand:contextBridge.switchAccount",
     "onCommand:contextBridge.refreshAccountQuota",
     "onCommand:contextBridge.useCodexReset",
@@ -118,7 +119,8 @@
     "onCommand:contextBridge.focusManagedSession",
     "onCommand:contextBridge.closeManagedSession",
     "onCommand:contextBridge.toggleAccountMaintenance",
-    "onCommand:contextBridge.runAccountMaintenance"
+    "onCommand:contextBridge.runAccountMaintenance",
+    "onCommand:contextBridge.keepClaudeChats"
   ],
   "main": "./src/extension.cjs",
   "contributes": {
@@ -221,6 +223,10 @@
         "command": "turntrail.toggleAccountMaintenance",
         "title": "Turntrail: Toggle Background Account Maintenance",
         "icon": "$(history)"
+      },
+      {
+        "command": "turntrail.keepClaudeChats",
+        "title": "Turntrail: Keep Claude Code Chats (Set Retention to 10 Years)"
       },
       {
         "command": "turntrail.runAccountMaintenance",

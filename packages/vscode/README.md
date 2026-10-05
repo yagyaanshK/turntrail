@@ -163,6 +163,12 @@ Every account gets its own configuration directory under `~/.turntrail/accounts/
 `CODEX_HOME` for Codex, `CLAUDE_CONFIG_DIR` for Claude — so they all stay signed in
 simultaneously and there is nothing to swap.
 
+Switching never touches Claude's `settings.json`. Because each account's directory is read in
+place of `~/.claude`, Turntrail copies your chat retention (`cleanupPeriodDays`) into it, so chats
+started as a managed account are not deleted after Claude's 30-day default. If the setting is
+missing altogether, the Claude section of the Accounts panel says so and offers **Keep chats for 10
+years**, which adds it to `~/.claude/settings.json` with a backup of the previous file.
+
 ### Signing in
 
 Each method is a card that expands in place, so one that will not work can be abandoned without

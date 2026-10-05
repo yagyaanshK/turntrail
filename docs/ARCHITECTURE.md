@@ -317,6 +317,17 @@ the stock `~/.claude` home, at `~/.claude.json`, but moves *inside* any custom
 `CLAUDE_CONFIG_DIR`. Both facts were verified on disk; getting either backwards means writing
 identity into a file nothing reads.
 
+Claude's `settings.json` lives inside the config directory in both cases, so an account directory
+does not see the user's `~/.claude/settings.json`. One key there destroys data by its absence:
+`cleanupPeriodDays`, without which Claude deletes transcripts idle for 30 days. `ensureClaudeHome`
+therefore carries that key, and only that key, from the default home into the account directory
+(`carryClaudeRetention`): a missing file is created holding just the retention, a longer value
+already present is kept, and a file that does not parse is left for the user. `readClaudeRetention`
+reports the effective value and its source (machine-wide managed settings, the user's file, or
+Claude's default), and `setClaudeRetention` writes it on explicit request, preserving every other
+key and copying the previous file aside first. A switch still writes only `.credentials.json` and
+the `oauthAccount` key.
+
 ### Credential sources, and what Turntrail does not touch
 
 `~/.codex` is shared by more than one program, and they do not all authenticate the same way. This

@@ -178,6 +178,15 @@ export {
   CLAUDE_PROVIDER
 } from './accounts/claude.js';
 export {
+  carryClaudeRetention,
+  claudeSettingsPath,
+  managedClaudeSettingsPath,
+  readClaudeRetention,
+  setClaudeRetention,
+  CLAUDE_DEFAULT_RETENTION_DAYS,
+  CLAUDE_KEEP_CHATS_DAYS
+} from './accounts/claude-settings.js';
+export {
   accountMaintenanceLockPath,
   maintainAccounts,
   DEFAULT_ACCOUNT_MAINTENANCE_INTERVAL_MS,

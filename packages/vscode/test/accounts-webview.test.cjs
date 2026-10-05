@@ -20,7 +20,7 @@ Module._load = function load(request, parent, isMain) {
   if (request === 'vscode') return vscode;
   return originalLoad.call(this, request, parent, isMain);
 };
-const { AccountsWebview } = require('../src/accounts-view.cjs');
+const { AccountsStore, AccountsWebview } = require('../src/accounts-view.cjs');
 Module._load = originalLoad;
 
 function fakeStore(model) {
@@ -136,4 +136,25 @@ test('the maintenance buttons run the toggle and run-now commands', async () => 
     'turntrail.toggleAccountMaintenance',
     'turntrail.runAccountMaintenance'
   ]);
+});
+
+test('the Claude section reports whether Claude Code is set to keep chats', async () => {
+  const retention = { days: 30, source: 'default', userDays: undefined, settingsState: 'ok', settingsPath: 'C:\private\settings.json' };
+  const store = new AccountsStore(async () => ({ readClaudeRetention: async () => retention }));
+  // Only what the card needs reaches the webview, not where the file lives.
+  assert.deepEqual(await store.claudeRetention(), { days: 30, source: 'default', settingsState: 'ok' });
+
+  const failing = new AccountsStore(async () => ({ readClaudeRetention: async () => { throw new Error('unreadable'); } }));
+  assert.equal(await failing.claudeRetention(), undefined);
+  const older = new AccountsStore(async () => ({}));
+  assert.equal(await older.claudeRetention(), undefined);
+});
+
+test('the keep-chats button runs its command', async () => {
+  const panel = new AccountsWebview(fakeStore({ sections: [] }));
+  const { view, message } = fakeView();
+  await panel.resolveWebviewView(view);
+  executed.length = 0;
+  message({ type: 'keepClaudeChats' });
+  assert.deepEqual(executed.map((call) => call[0]), ['turntrail.keepClaudeChats']);
 });

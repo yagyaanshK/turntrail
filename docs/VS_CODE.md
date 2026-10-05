@@ -98,6 +98,9 @@ The selected account is shown in the terminal title and remains pinned through i
 changing homes can make their existing transcript unavailable.
 The Sessions view scans those managed account homes as well as the default native stores, so their
 transcripts remain discoverable after the terminal closes.
+Each managed Claude home receives the user's `cleanupPeriodDays` when Turntrail prepares it, so a
+transcript written there follows the same retention as one in `~/.claude` instead of Claude's 30-day
+default. The Accounts panel warns when no retention is set anywhere and offers to set ten years.
 
 Inside **Handoff**, **Send to → Managed CLI** provides direct delivery:
 

@@ -79,6 +79,7 @@ async function activateExtension(context) {
     ...compatibleCommands('forgetAccount', (item) => forgetAccount(item)),
     ...compatibleCommands('toggleAccountMaintenance', () => toggleAccountMaintenance()),
     ...compatibleCommands('runAccountMaintenance', () => runAccountMaintenance()),
+    ...compatibleCommands('keepClaudeChats', (item) => keepClaudeChats(item)),
     ...compatibleCommands('discoverClaude', () => discover('claude')),
     ...compatibleCommands('discoverCodex', () => discover('codex')),
     ...compatibleCommands('discoverGemini', () => discover('gemini')),
@@ -816,6 +817,39 @@ function accountMaintenanceConfig() {
 function rescheduleAccountMaintenance() {
   accountMaintenance.reschedule();
   accountsWebview?.refresh().catch(() => {});
+}
+
+// Keep Claude Code from deleting chats after its 30-day default. Writes the
+// user's own Claude settings, so it runs only on request: from the Accounts
+// panel card, which states the change, or after a confirmation here.
+async function keepClaudeChats(item = {}) {
+  const api = await core();
+  const days = api.CLAUDE_KEEP_CHATS_DAYS;
+  if (!item.confirmed) {
+    const choice = await vscode.window.showWarningMessage(
+      `Keep Claude Code chats for ${days} days?`,
+      {
+        modal: true,
+        detail:
+          `Turntrail will add "cleanupPeriodDays": ${days} to Claude's settings.json, leave every other setting ` +
+          'as it is, and save a backup of the file first. Chats already deleted cannot be brought back.'
+      },
+      'Keep Chats'
+    );
+    if (choice !== 'Keep Chats') return;
+  }
+
+  const result = await api.setClaudeRetention(days);
+  // Account folders made before the setting existed pick it up now rather than
+  // at their next launch.
+  const accounts = (await api.listAccounts()).filter((account) => account.provider === 'claude');
+  await Promise.all(accounts.map((account) => api.carryClaudeRetention(account.id).catch(() => undefined)));
+  await accountsWebview?.refresh().catch(() => {});
+
+  vscode.window.showInformationMessage(
+    `Turntrail: Claude Code now keeps chats for ${days} days. Restart Claude Code so it reads the setting.` +
+      (result.backupPath ? ` The previous settings were saved as ${path.basename(result.backupPath)}.` : '')
+  );
 }
 
 async function toggleAccountMaintenance() {

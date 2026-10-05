@@ -165,10 +165,30 @@ class AccountsStore {
       const rows = accounts.map((account) => this.row(account, provider, signedIn, resumesAt));
       const recommended = recommendAccount(rows);
       const presentedRows = rows.map((row) => ({ ...row, recommended: row.id === recommended?.id }));
-      sections.push({ ...provider, rows: presentedRows, summary: summarizeAccounts(presentedRows) });
+      const section = { ...provider, rows: presentedRows, summary: summarizeAccounts(presentedRows) };
+      if (provider.id === 'claude') section.retention = await this.claudeRetention();
+      sections.push(section);
     }
 
     return { sections, handoff: this.handoff };
+  }
+
+  // Whether Claude Code is set to keep chats. Without the setting it deletes
+  // any chat idle for 30 days, which is the one way the agent's own history
+  // disappears without anything in Turntrail having touched it.
+  async claudeRetention() {
+    try {
+      const { readClaudeRetention } = await this.core();
+      if (typeof readClaudeRetention !== 'function') return undefined;
+      const retention = await readClaudeRetention();
+      return {
+        days: retention.days,
+        source: retention.source,
+        settingsState: retention.settingsState
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   row(account, provider, signedIn, resumesAt) {
@@ -365,6 +385,7 @@ class AccountsWebview {
         useReset: 'turntrail.useCodexReset',
         toggleMaintenance: 'turntrail.toggleAccountMaintenance',
         runMaintenance: 'turntrail.runAccountMaintenance',
+        keepClaudeChats: 'turntrail.keepClaudeChats',
         handoff: 'turntrail.createHandoff',
         openHandoff: 'turntrail.openLatestHandoff',
         copyHandoff: 'turntrail.copyLatestHandoffPrompt'
@@ -623,6 +644,9 @@ function html(webview) {
   button:hover { background: var(--vscode-button-secondaryHoverBackground); }
   button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
   button.primary:hover { background: var(--vscode-button-hoverBackground); }
+  .retention { margin: 4px 0 8px; padding: 7px 9px; border-radius: 4px; border: 1px solid var(--vscode-charts-yellow); line-height: 1.45; font-size: 0.9em; }
+  .retention-text { margin-bottom: 6px; }
+  .retention code { font-size: 0.95em; }
   button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
   .add {
     margin-top: 8px;
@@ -944,10 +968,24 @@ function renderSection(section) {
 
   return '<section class="agent" data-provider="' + provider + '">' +
     '<span class="agent-name">' + esc(section.title) + '</span>' +
+    renderRetention(section.retention) +
     body +
     '<button class="add" data-act="add" data-provider="' + provider + '">+ ' +
       (section.rows.length === 0 ? 'Sign in to a' + article(noun) : 'Add another') + ' ' + noun + '</button>' +
   '</section>';
+}
+
+// Shown only when Claude Code would delete chats after its 30-day default. The
+// card says exactly what the button changes, so the click is the confirmation.
+function renderRetention(retention) {
+  if (!retention || retention.source !== 'default' || retention.settingsState === 'unreadable') return '';
+  return '<div class="retention">' +
+    '<div class="retention-text"><b>Claude Code deletes chats idle for ' + esc(String(retention.days)) + ' days.</b> ' +
+      'No <code>cleanupPeriodDays</code> is set, so older chats are being removed. ' +
+      'Keeping them adds <code>"cleanupPeriodDays": 3650</code> to <code>~/.claude/settings.json</code>, ' +
+      'leaves your other settings as they are, and saves a backup first.</div>' +
+    '<button class="primary" data-act="keepClaudeChats">Keep chats for 10 years</button>' +
+  '</div>';
 }
 
 function renderReadiness(summary) {
