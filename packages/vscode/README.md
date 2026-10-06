@@ -222,8 +222,14 @@ picked. For Claude that means two files: the credential, plus the `oauthAccount`
 else in that file — project history, caches — is left byte-identical, and both files are backed up
 first.
 
-The account in use is marked and appears in the status bar with its remaining quota. Every account
-stays signed in, so switching back is one more click; the confirmation also offers **Undo** and
+The account in use is marked in the panel. The status bar shows the account in use and its remaining quota for the agent you are working
+with, marked with that agent's logo: the Claude spark for Claude Code, the OpenAI mark for Codex.
+When both agents have an account in use it follows whichever was used most recently in this
+workspace, judged by a write to one of its transcripts here, focusing a terminal Turntrail opened
+for it, or switching its account. Hovering shows both agents' accounts and limits and why one is on
+the bar; clicking switches that agent's account.
+
+Every account stays signed in, so switching back is one more click; the confirmation also offers **Undo** and
 **Reload Window**.
 
 For Codex OAuth accounts, switching first rotates the incoming refresh token with OpenAI. This

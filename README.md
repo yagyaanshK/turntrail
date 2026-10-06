@@ -423,7 +423,12 @@ in again to an account that is already selected, **Update Claude login** or **Up
 runs the same guarded verification and replacement so the repaired managed credential reaches the
 official client.
 
-The account in use is marked in the panel and shown in the status bar with its remaining quota.
+The account in use is marked in the panel. The status bar shows the account in use and its remaining quota for the agent you are working
+with, marked with that agent's logo: the Claude spark for Claude Code, the OpenAI mark for Codex.
+When both agents have an account in use it follows whichever was used most recently in this
+workspace, judged by a write to one of its transcripts here, focusing a terminal Turntrail opened
+for it, or switching its account. Hovering shows both agents' accounts and limits and why one is on
+the bar; clicking switches that agent's account.
 Every account stays signed in, so this is cheap and reversible; the toast offers **Undo**. To use an
 account *without* changing the default, use **Terminal**, which scopes the variable to that one
 session.

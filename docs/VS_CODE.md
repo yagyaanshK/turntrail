@@ -83,6 +83,20 @@ the reports.
 Gemini and Cursor are currently source providers. Their sessions can be imported, viewed, and handed
 off to Claude or Codex, but Turntrail does not yet open or inject prompts into Gemini or Cursor.
 
+### Status Bar
+
+The status bar shows the account in use and its remaining quota for the agent you are working
+with, marked with that agent's logo: the Claude spark for Claude Code, the OpenAI mark for Codex.
+When both agents have an account in use it follows whichever was used most recently in this
+workspace, judged by a write to one of its transcripts here, focusing a terminal Turntrail opened
+for it, or switching its account. Hovering shows both agents' accounts and limits and why one is on
+the bar; clicking switches that agent's account.
+
+The logos are glyphs of a small icon font in `media/turntrail-icons.woff`, contributed as
+`turntrail-claude` and `turntrail-openai`. It is built from the Simple Icons SVGs in
+`media/brand/` (CC0) by `scripts/build-brand-icons.py`; the marks remain their owners' trademarks
+and are used only to say which agent a number belongs to.
+
 ### Managed CLI Sessions
 
 The **Managed CLI** strip above the session list shows Claude and Codex terminals opened by

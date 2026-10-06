@@ -10,6 +10,8 @@ const { ManagedTerminalStore } = require('./managed-terminals.cjs');
 const { handoffForRoot } = require('./handoff-state.cjs');
 const { LoginPanel } = require('./login-view.cjs');
 const { runWithCancellation } = require('./progress.cjs');
+const { AgentActivity } = require('./agent-activity.cjs');
+const { chooseStatusProvider, terminalProvider } = require('./status-choice.cjs');
 const {
   consumeSwitchResults,
   createSwitchRequest,
@@ -27,6 +29,9 @@ let managedTerminals;
 let accountMaintenance;
 let accountMaintenanceOutput;
 let accountMaintenanceOffer;
+let agentActivity;
+let statusShown;
+let statusTimer;
 
 async function activateExtension(context) {
   accountsProvider = new AccountsStore(core);
@@ -46,13 +51,23 @@ async function activateExtension(context) {
   accountStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   accountStatus.command = 'turntrail.switchAccount';
   accountStatus.name = 'Turntrail: active account';
-  accountsProvider.onDidChange(() => accountsProvider.summary().then(renderStatus));
+  // The bar shows the limits of the agent in use here, so it listens for signs
+  // of use as well as for account changes.
+  agentActivity = new AgentActivity({ isWorkspaceTranscript });
+  agentActivity.onDidChange(() => scheduleStatus());
+  accountsProvider.onDidChange(() => {
+    scheduleStatus();
+    watchAgentFolders().catch(() => {});
+  });
   accountMaintenanceOutput = vscode.window.createOutputChannel('Turntrail Accounts');
   accountMaintenance = createAccountMaintenance(context);
   managedTerminals.start(context);
+  startAgentActivity().catch(() => {}).finally(() => scheduleStatus());
   sessionsProvider.setManaged(managedTerminals.viewModel());
 
   context.subscriptions.push(
+    vscode.window.onDidChangeActiveTerminal((terminal) => noticeTerminal(terminal)),
+    { dispose: () => { agentActivity?.dispose(); clearTimeout(statusTimer); } },
     accountStatus,
     accountMaintenanceOutput,
     accountMaintenance,
@@ -202,6 +217,7 @@ async function switchAccount(item) {
     vscode.window.showErrorMessage(`Turntrail: could not switch to "${account.label}" — ${result.error}`);
     return;
   }
+  agentActivity?.record(account.provider);
   await accountsProvider.reloadUsage({ offline: true });
 
   const usage = accountsProvider.usage.get(account.id);
@@ -415,26 +431,143 @@ async function showRawUsage(item) {
   await vscode.window.showTextDocument(document, { preview: false });
 }
 
-function renderStatus(summary) {
+// Icons contributed by this extension from media/turntrail-icons.woff: the
+// Claude spark and the OpenAI mark, so the number reads as one agent's at a
+// glance. Codex is OpenAI's agent.
+const STATUS_ICONS = { claude: '$(turntrail-claude)', codex: '$(turntrail-openai)' };
+
+// Coalesces bursts: a transcript is written several times per message.
+function scheduleStatus() {
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => {
+    accountsProvider.summaries().then(renderStatus).catch(() => {});
+  }, 300);
+}
+
+function renderStatus(summaries = []) {
+  const choice = chooseStatusProvider({
+    candidates: summaries.map((summary) => summary.provider),
+    activity: agentActivity?.latest(),
+    previous: statusShown
+  });
+  const summary = choice && summaries.find((item) => item.provider === choice.provider);
   if (!summary?.label) {
+    statusShown = undefined;
     accountStatus.hide();
     return;
   }
+  statusShown = summary.provider;
+
   const remaining = summary.remaining;
+  const icon = STATUS_ICONS[summary.provider] || '$(arrow-swap)';
   accountStatus.text =
-    remaining === undefined
-      ? `$(arrow-swap) ${summary.label}`
-      : `$(arrow-swap) ${summary.label} ${formatPercent(remaining)}`;
-  accountStatus.tooltip =
-    `${summary.title || 'Codex'} is using "${summary.label}". Click to switch account.` +
-    // Being told the limit is reached without being told when it lifts is the
-    // half of the message that is no use.
-    (summary.limitReached ? `\nLimit reached${summary.resumesAt ? ` — resumes ${describeWhen(summary.resumesAt)}` : ''}.` : '');
+    remaining === undefined ? `${icon} ${summary.label}` : `${icon} ${summary.label} ${formatPercent(remaining)}`;
+  accountStatus.command = {
+    command: 'turntrail.switchAccount',
+    title: 'Switch account',
+    arguments: [{ provider: summary.provider }]
+  };
+  accountStatus.tooltip = statusTooltip(summaries, summary, choice);
   accountStatus.backgroundColor =
     typeof remaining === 'number' && remaining <= 10
       ? new vscode.ThemeColor('statusBarItem.warningBackground')
       : undefined;
   accountStatus.show();
+}
+
+// Every agent's account and limit, the one on the bar first, and why it is
+// that one, so the other agent's number is one hover away.
+function statusTooltip(summaries, shown, choice) {
+  const describe = (summary) => {
+    const left = summary.remaining === undefined ? 'limit not read yet' : `${formatPercent(summary.remaining)} left`;
+    const reached = summary.limitReached
+      ? ` · limit reached${summary.resumesAt ? `, resumes ${describeWhen(summary.resumesAt)}` : ''}`
+      : '';
+    return `${summary.title} · "${summary.label}" · ${left}${reached}`;
+  };
+  const ordered = [shown, ...summaries.filter((summary) => summary !== shown)];
+  const why = {
+    only: `${shown.title} is the only agent with an account in use.`,
+    recent: `Showing ${shown.title}: it was used in this workspace most recently${choice?.at ? ` (${describeAgo(choice.at)})` : ''}.`,
+    previous: `Showing ${shown.title}: neither agent has been used here since this window opened.`,
+    default: `Showing ${shown.title}: neither agent has been used here since this window opened.`
+  }[choice?.reason] || '';
+  return [...ordered.map(describe), '', why, `Click to switch the ${shown.title} account.`].filter((line, index, all) => line || all[index - 1]).join('\n');
+}
+
+function describeAgo(ms) {
+  const minutes = Math.round((Date.now() - ms) / 60000);
+  if (!Number.isFinite(minutes) || minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+}
+
+// A focused terminal that Turntrail opened for an agent is a sign of use.
+function noticeTerminal(terminal) {
+  if (!terminal) return;
+  const managed = managedTerminals?.list?.().find((record) => record.terminal === terminal);
+  const provider = terminalProvider(terminal, managed?.provider);
+  if (provider) agentActivity?.record(provider);
+}
+
+// Whether a transcript belongs to an open workspace folder, read from the
+// working directory the transcript itself records.
+async function isWorkspaceTranscript(provider, file) {
+  const folders = (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath);
+  if (folders.length === 0) return false;
+  const api = await core();
+  for (const root of folders) {
+    const [session] = await api.discoverNativeSessions(provider, { root, path: file, all: true }).catch(() => []);
+    if (session?.matchesProject) return true;
+  }
+  return false;
+}
+
+// Watch both agents' transcript folders, the default ones and each managed
+// account's, and seed the activity from the newest transcript already in this
+// workspace, so the bar is right before anything new is written.
+async function startAgentActivity() {
+  const api = await core();
+  await watchAgentFolders(api);
+  await seedAgentActivity(api);
+}
+
+// Re-armed when the set of accounts changes, since each managed account keeps
+// its transcripts in a folder of its own.
+let watchedAccounts;
+async function watchAgentFolders(api) {
+  api ||= await core();
+  const accounts = await api.listAccounts().catch(() => []);
+  const signature = accounts.map((account) => `${account.provider}:${account.id}`).sort().join('|');
+  if (signature === watchedAccounts) return;
+  watchedAccounts = signature;
+  agentActivity.watchDirs({
+    claude: [
+      path.join(api.defaultClaudeHome(), 'projects'),
+      ...accounts.filter((account) => account.provider === 'claude').map((account) => path.join(api.claudeHome(account.id), 'projects'))
+    ],
+    codex: [
+      path.join(api.defaultCodexHome(), 'sessions'),
+      ...accounts.filter((account) => account.provider === 'codex').map((account) => path.join(api.codexHome(account.id), 'sessions'))
+    ]
+  });
+}
+
+async function seedAgentActivity(api) {
+  const folders = (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath);
+  for (const root of folders) {
+    const index = await api.listSessionIndex(root, {
+      providers: ['claude', 'codex'],
+      discoveryCache: sessionsProvider?.discoveryCache,
+      discoveryOptions: await accountSessionDiscoveryOptions()
+    }).catch(() => ({ sessions: [] }));
+    for (const row of index.sessions || []) {
+      if (row.kind !== 'native' || !row.matchesProject) continue;
+      const at = Date.parse(row.modifiedAt || '');
+      if (Number.isFinite(at)) agentActivity.record(row.provider, at);
+    }
+  }
 }
 
 // "in 42m" / "in 3d", for a sentence rather than a bare label.

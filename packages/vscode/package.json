@@ -324,6 +324,22 @@
         "title": "Turntrail: Close Managed CLI Session"
       }
     ],
+    "icons": {
+      "turntrail-claude": {
+        "description": "Claude mark, shown beside Claude Code limits in the status bar",
+        "default": {
+          "fontPath": "media/turntrail-icons.woff",
+          "fontCharacter": "\\E000"
+        }
+      },
+      "turntrail-openai": {
+        "description": "OpenAI mark, shown beside Codex limits in the status bar",
+        "default": {
+          "fontPath": "media/turntrail-icons.woff",
+          "fontCharacter": "\\E001"
+        }
+      }
+    },
     "configuration": {
       "title": "Turntrail",
       "properties": {

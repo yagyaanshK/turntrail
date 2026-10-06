@@ -261,23 +261,27 @@ class AccountsStore {
 
   // The status bar shows one agent at a time. Codex wins when both are set,
   // because that is the one whose switch is machine-global and easy to forget.
-  async summary() {
+  // The account in use for every agent that has one, each with its limits.
+  // The status bar shows one of them, chosen by which agent is being used; it
+  // used to take the first here, which was always Codex.
+  async summaries() {
     const { resumesAt } = await this.core();
+    const result = [];
     for (const provider of PROVIDERS) {
       const accounts = await this.accounts(provider.id);
       const active = accounts.find((account) => account.id === this.activeIds[provider.id]);
       if (!active) continue;
       const usage = this.usage.get(active.id);
-      return {
+      result.push({
         provider: provider.id,
         title: provider.title,
         label: active.label,
         remaining: remainingOf(usage),
         limitReached: Boolean(usage?.limitReached),
         resumesAt: resumesAt(usage)
-      };
+      });
     }
-    return { label: undefined };
+    return result;
   }
 }
 
