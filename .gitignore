@@ -15,3 +15,7 @@ dist/*.vsix
 # Disposable profiles and credentials used to capture marketing screenshots.
 .marketing-capture/
 .marketing-tools/
+
+# Local launch and demo notes, kept out of the repository.
+/context-bridge-demo-guide.md
+/context-bridge-launch-tweets.md
