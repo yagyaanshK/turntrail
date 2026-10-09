@@ -5,6 +5,7 @@ import { ensureDir, pathExists, writeFileAtomic } from './fs-utils.js';
 import { accountsRoot, listAccounts } from './accounts/store.js';
 import { claudeHome, defaultClaudeHome } from './accounts/claude.js';
 import { codexHome, defaultCodexHome } from './accounts/codex.js';
+import { readCodexThreadNames } from './adapters/codex-index.js';
 
 // Token use, read from the transcripts the agents already write.
 //
@@ -23,7 +24,8 @@ import { codexHome, defaultCodexHome } from './accounts/codex.js';
 //   output      generated tokens, reasoning included
 // "Work" is fresh + cacheWrite + output: what a turn added.
 
-const INDEX_VERSION = 1;
+// 2: buckets carry re-sent context, and files their context size and name.
+const INDEX_VERSION = 2;
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 const CLAUDE_RECENT_IDS = 64;
 export const USAGE_AGENTS = ['claude', 'codex'];
@@ -107,6 +109,15 @@ export async function scanUsage(options = {}) {
   }
   for (const known of Object.keys(index.files)) if (!seen.has(known)) delete index.files[known];
 
+  // Codex keeps its chat names outside the transcript, keyed by thread id.
+  const names = await readCodexThreadNames({
+    ...options,
+    sessionIndex: options.sessionIndex || path.join(defaultCodexHome(options), 'session_index.jsonl')
+  }).catch(() => new Map());
+  for (const entry of Object.values(index.files)) {
+    if (entry.agent === 'codex' && entry.sessionId && names.get(entry.sessionId)) entry.title = names.get(entry.sessionId);
+  }
+
   index.scannedAt = new Date((options.now || Date.now)()).toISOString();
   if (options.persist !== false) {
     const target = usageIndexPath(options);
@@ -188,20 +199,50 @@ function localHourKey(iso) {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}`;
 }
 
+// Bucket layout, one per local hour and model:
+//   [0] fresh       uncached input
+//   [1] cacheWrite  input written to the prompt cache
+//   [2] cacheRead   input served from the prompt cache
+//   [3] output
+//   [4] calls
+//   [5] resent      the part of fresh + cacheWrite that was the conversation
+//                   sent again because the cache missed, not new content
+//   [6] resentAfterPause  the part of resent that followed a pause
 function addUsage(entry, at, model, usage, sign = 1) {
   const hour = localHourKey(at);
   if (!hour) return undefined;
   const key = `${hour}|${model || 'unknown'}`;
-  const bucket = (entry.buckets[key] ||= [0, 0, 0, 0, 0]);
+  const bucket = (entry.buckets[key] ||= [0, 0, 0, 0, 0, 0, 0]);
   bucket[0] += sign * usage.fresh;
   bucket[1] += sign * usage.cacheWrite;
   bucket[2] += sign * usage.cacheRead;
   bucket[3] += sign * usage.output;
   bucket[4] += sign;
+  bucket[5] = (bucket[5] || 0) + sign * (usage.resent || 0);
+  bucket[6] = (bucket[6] || 0) + sign * (usage.resentAfterPause || 0);
   return key;
 }
 
 const num = (value) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+
+// A call re-sent the conversation when its cache missed: most of what it
+// carried had to be sent or cached again, though little of it was new. That
+// happens after a pause longer than the cache lives, and mid-session when
+// something changes what the cache can reuse. A small context is ignored:
+// there a miss costs little and the share means nothing.
+const RESEND_MIN_CONTEXT = 20000;
+const PAUSE_MS = 5 * 60 * 1000;
+
+function classifyResend(entry, at, context, uncached) {
+  const time = Date.parse(at);
+  const previous = entry.state.lastAt;
+  entry.state.lastAt = Number.isFinite(time) ? time : previous;
+  entry.lastContext = context;
+  entry.lastCallAt = at;
+  if (context < RESEND_MIN_CONTEXT || uncached <= context / 2) return { resent: 0, resentAfterPause: 0 };
+  const paused = !previous || !Number.isFinite(time) || time - previous > PAUSE_MS;
+  return { resent: uncached, resentAfterPause: paused ? uncached : 0 };
+}
 
 function parseLine(entry, line) {
   if (entry.agent === 'claude') parseClaudeLine(entry, line);
@@ -214,6 +255,15 @@ function parseClaudeLine(entry, line) {
   if (!entry.cwd && line.includes('"cwd"')) {
     const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(line);
     if (cwd) entry.cwd = JSON.parse(`"${cwd[1]}"`);
+  }
+  // Claude names its chats itself; the latest name is the one it shows.
+  if (line.includes('"aiTitle"')) {
+    try {
+      const title = JSON.parse(line).aiTitle;
+      if (typeof title === 'string' && title.trim()) entry.title = title.trim().slice(0, 160);
+    } catch {
+      // Not a title line after all.
+    }
   }
   if (!line.includes('"usage"') || !line.includes('"assistant"')) return;
   let event;
@@ -232,11 +282,15 @@ function parseClaudeLine(entry, line) {
     if (recent.length > CLAUDE_RECENT_IDS) recent.shift();
   }
   const usage = message.usage;
+  const fresh = num(usage.input_tokens);
+  const cacheWrite = num(usage.cache_creation_input_tokens);
+  const cacheRead = num(usage.cache_read_input_tokens);
   addUsage(entry, event.timestamp, message.model, {
-    fresh: num(usage.input_tokens),
-    cacheWrite: num(usage.cache_creation_input_tokens),
-    cacheRead: num(usage.cache_read_input_tokens),
-    output: num(usage.output_tokens)
+    fresh,
+    cacheWrite,
+    cacheRead,
+    output: num(usage.output_tokens),
+    ...classifyResend(entry, event.timestamp, fresh + cacheWrite + cacheRead, cacheWrite)
   });
 }
 
@@ -250,7 +304,9 @@ function parseCodexLine(entry, line) {
   const head = line.slice(0, 300);
   if (head.includes('"type":"session_meta"')) {
     try {
-      entry.cwd ||= JSON.parse(line).payload?.cwd;
+      const payload = JSON.parse(line).payload || {};
+      entry.cwd ||= payload.cwd;
+      entry.sessionId ||= payload.id;
     } catch {
       // A malformed first line leaves the project unknown.
     }
@@ -279,7 +335,8 @@ function parseCodexLine(entry, line) {
     // from the figure, so it is taken back out rather than counted twice.
     const previous = entry.state.lastTurn;
     if (!entry.state.records && previous && usage && sameCodexUsage(previous.usage, usage)) {
-      addUsage(entry, previous.at, previous.model, codexParts(previous.usage), -1);
+      addUsage(entry, previous.at, previous.model, previous.parts, -1);
+      entry.state.lastAt = previous.lastAtBefore;
     }
     entry.state.records = true;
     entry.state.lastTurn = undefined;
@@ -294,20 +351,31 @@ function parseCodexLine(entry, line) {
     usage = info.last_token_usage;
   }
   if (!usage) return;
-  addUsage(entry, event.timestamp, entry.state.model, codexParts(usage));
+  const lastAtBefore = entry.state.lastAt;
+  const parts = codexParts(entry, event.timestamp, usage);
+  addUsage(entry, event.timestamp, entry.state.model, parts);
   if (!record) {
     entry.state.lastTurn = {
       at: event.timestamp,
       model: entry.state.model,
-      usage: { input_tokens: usage.input_tokens, cached_input_tokens: usage.cached_input_tokens, cache_write_input_tokens: usage.cache_write_input_tokens, output_tokens: usage.output_tokens }
+      parts,
+      lastAtBefore,
+      usage: { input_tokens: usage.input_tokens, cached_input_tokens: usage.cached_input_tokens, output_tokens: usage.output_tokens }
     };
   }
 }
 
-function codexParts(usage) {
+// Codex reports input including what was served from the cache.
+function codexParts(entry, at, usage) {
   const input = num(usage.input_tokens);
   const cached = Math.min(input, num(usage.cached_input_tokens));
-  return { fresh: input - cached, cacheWrite: num(usage.cache_write_input_tokens), cacheRead: cached, output: num(usage.output_tokens) };
+  return {
+    fresh: input - cached,
+    cacheWrite: num(usage.cache_write_input_tokens),
+    cacheRead: cached,
+    output: num(usage.output_tokens),
+    ...classifyResend(entry, at, input, input - cached)
+  };
 }
 
 function sameCodexUsage(a, b) {
@@ -316,15 +384,28 @@ function sameCodexUsage(a, b) {
 
 // ---------------------------------------------------------------------------
 // Summaries
+//
+// Four disjoint parts that add up to everything the agent processed:
+//   newInput   input the model had not seen: your messages, files, tool output
+//   resent     the conversation sent again after a cache miss
+//   cacheRead  the conversation re-read from the prompt cache each turn
+//   output     what the model wrote, reasoning included
+// `total` is their sum. `work` (new input, cache writes and output) is kept
+// for callers that used it.
 
-const zero = () => ({ fresh: 0, cacheWrite: 0, cacheRead: 0, output: 0, calls: 0, work: 0 });
+const zero = () => ({ fresh: 0, cacheWrite: 0, cacheRead: 0, output: 0, calls: 0, work: 0, resent: 0, resentAfterPause: 0, newInput: 0, total: 0 });
 function accumulate(target, bucket) {
+  const resent = bucket[5] || 0;
   target.fresh += bucket[0];
   target.cacheWrite += bucket[1];
   target.cacheRead += bucket[2];
   target.output += bucket[3];
   target.calls += bucket[4];
   target.work += bucket[0] + bucket[1] + bucket[3];
+  target.resent += resent;
+  target.resentAfterPause += bucket[6] || 0;
+  target.newInput += bucket[0] + bucket[1] - resent;
+  target.total += bucket[0] + bucket[1] + bucket[2] + bucket[3];
 }
 
 function dayKey(date) {
@@ -393,15 +474,17 @@ export function summarizeUsage(index, options = {}) {
     return map.get(key);
   };
 
-  for (const entry of Object.values(index.files || {})) {
+  const sessions = [];
+  for (const [file, entry] of Object.entries(index.files || {})) {
     const agent = entry.agent;
     if (!USAGE_AGENTS.includes(agent)) continue;
+    const inRange = zero();
     for (const [key, bucket] of Object.entries(entry.buckets || {})) {
       const [hour, model] = key.split('|');
       const day = hour.slice(0, 10);
       accumulate(totals[agent], bucket);
       const modelKey = `${agent}|${model}`;
-      modelAllTime.set(modelKey, (modelAllTime.get(modelKey) || 0) + bucket[0] + bucket[1] + bucket[3]);
+      modelAllTime.set(modelKey, (modelAllTime.get(modelKey) || 0) + bucket[0] + bucket[1] + bucket[2] + bucket[3]);
       if (!earliest[agent] || hour < earliest[agent]) earliest[agent] = hour;
       if (hour === lastHour) accumulate(windows[agent].lastHour, bucket);
       if (hour >= since24) accumulate(windows[agent].last24h, bucket);
@@ -409,25 +492,43 @@ export function summarizeUsage(index, options = {}) {
       if (day >= since7) accumulate(windows[agent].last7, bucket);
       if (day >= since30) accumulate(windows[agent].last30, bucket);
       if (day < rangeStart) continue;
+      accumulate(inRange, bucket);
       const point = series.get(day);
       if (point) accumulate(point[agent], bucket);
       if (!modelDaily.has(day)) modelDaily.set(day, new Map());
       const perModel = modelDaily.get(day);
       const cell = perModel.get(modelKey) || [0, 0];
-      cell[0] += bucket[0] + bucket[1] + bucket[3];
-      cell[1] += bucket[2];
+      cell[0] += bucket[0] + bucket[1] + bucket[2] + bucket[3];
+      cell[1] += bucket[0] + bucket[1] + bucket[3];
       perModel.set(modelKey, cell);
       accumulate(group(byModel, modelKey, agent, model), bucket);
       accumulate(group(byProject, `${agent}|${entry.cwd || ''}`, agent, projectName(entry.cwd)), bucket);
       const accountLabel = entry.account === 'default' ? 'Default sign-in' : index.labels?.[entry.account] || entry.account;
       accumulate(group(byAccount, `${agent}|${entry.account}`, agent, accountLabel), bucket);
     }
+    // Only sessions used in the last week: the list is about what is still
+    // being continued. A subagent's recording belongs to its parent's chat.
+    const recent = entry.lastCallAt && Date.parse(entry.lastCallAt) >= now.getTime() - 7 * 86400000;
+    if (recent && entry.lastContext > 0 && !/[\/]subagents[\/]/.test(file)) {
+      sessions.push({
+        agent,
+        title: entry.title || undefined,
+        project: projectName(entry.cwd),
+        perTurn: entry.lastContext,
+        lastActive: entry.lastCallAt,
+        calls: inRange.calls,
+        total: inRange.total,
+        resent: inRange.resent
+      });
+    }
   }
 
   const ranked = (map, limit = top) => [...map.values()]
-    .filter((row) => row.work > 0 || row.cacheRead > 0)
-    .sort((a, b) => b.work - a.work || b.cacheRead - a.cacheRead)
+    .filter((row) => row.total > 0)
+    .sort((a, b) => b.total - a.total)
     .slice(0, limit);
+  // The chats that now cost the most to continue: what one more turn carries.
+  const heaviestSessions = sessions.sort((a, b) => b.perTurn - a.perTurn).slice(0, options.sessionTop || 5);
   const models = ranked(byModel, options.modelTop || 50);
   return {
     generatedAt: now.toISOString(),
@@ -437,8 +538,12 @@ export function summarizeUsage(index, options = {}) {
     totals,
     earliest: Object.fromEntries(Object.entries(earliest).map(([agent, hour]) => [agent, hour.slice(0, 10)])),
     windows,
-    // Per-hour work over the last 24 hours, the burn rate.
-    burnPerHour: Object.fromEntries(USAGE_AGENTS.map((agent) => [agent, Math.round(windows[agent].last24h.work / 24)])),
+    // Tokens per hour over the last 24 hours, the burn rate, with and without
+    // cache reads.
+    burnPerHour: Object.fromEntries(USAGE_AGENTS.map((agent) => [agent, Math.round(windows[agent].last24h.total / 24)])),
+    burnPerHourWork: Object.fromEntries(USAGE_AGENTS.map((agent) => [agent, Math.round(windows[agent].last24h.work / 24)])),
+    heaviestSessions,
+    insights: usageInsights(windows, heaviestSessions),
     daily: [...series.values()],
     byModel: models,
     modelSeries: modelSeries(models, modelAllTime, modelDaily, [...series.keys()]),
@@ -465,21 +570,68 @@ function modelSeries(rankedModels, allTime, modelDaily, days) {
   const hasOther = rankedModels.length > MODEL_SERIES;
   if (hasOther) models.push({ key: 'other', label: `Other models (${rankedModels.length - MODEL_SERIES})`, rank: -1 });
   const daily = days.map((day) => {
+    const total = {};
     const work = {};
-    const cacheRead = {};
     for (const model of models) {
+      total[model.key] = 0;
       work[model.key] = 0;
-      cacheRead[model.key] = 0;
     }
     for (const [key, cell] of modelDaily.get(day) || []) {
       const target = shownKeys.has(key) ? key : hasOther ? 'other' : undefined;
       if (!target) continue;
-      work[target] += cell[0];
-      cacheRead[target] += cell[1];
+      total[target] += cell[0];
+      work[target] += cell[1];
     }
-    return { day, work, cacheRead };
+    return { day, total, work };
   });
   return { models, daily };
+}
+
+// What to tell someone about how their tokens are spent, from the last seven
+// days. Each insight is a finding with its numbers and something to do about
+// it; none is shown when the numbers do not support it.
+export function usageInsights(windows, heaviestSessions = []) {
+  const insights = [];
+  const names = { claude: 'Claude Code', codex: 'Codex' };
+  for (const agent of USAGE_AGENTS) {
+    const week = windows?.[agent]?.last7;
+    if (!week) continue;
+    const input = week.newInput + week.resent;
+    if (week.resent >= 1e6 && input > 0 && week.resent / input >= 0.4) {
+      const afterPause = week.resent > 0 ? week.resentAfterPause / week.resent : 0;
+      insights.push({
+        kind: 'resent',
+        agent,
+        share: week.resent / input,
+        afterPauseShare: afterPause,
+        tokens: week.resent,
+        message: `Re-sent context was ${Math.round((100 * week.resent) / input)}% of ${names[agent]}'s input this week, not counting cache reads.`,
+        advice: afterPause >= 0.5
+          ? 'Most of it came after a break in a long session, when the cache had expired and the whole conversation was sent again. Rather than resuming a long session after a break, start a fresh one or hand off.'
+          : 'Most of it happened mid-session, when the cache could not be reused. Starting a new session for a new task keeps each turn smaller.'
+      });
+    }
+  }
+  const all = USAGE_AGENTS.reduce((sum, agent) => sum + (windows?.[agent]?.last7?.total || 0), 0);
+  const reads = USAGE_AGENTS.reduce((sum, agent) => sum + (windows?.[agent]?.last7?.cacheRead || 0), 0);
+  if (all > 0 && reads / all >= 0.8) {
+    const top = heaviestSessions[0];
+    insights.push({
+      kind: 'cacheReads',
+      share: reads / all,
+      message: `${Math.round((100 * reads) / all)}% of this week's tokens were cache reads: every turn re-reads the whole conversation, however little is written.`,
+      advice: top
+        ? `So a long session costs more with every turn. Your heaviest, ${top.title ? `"${top.title}"` : top.project}, carries ${formatCount(top.perTurn)} tokens a turn; a new task is cheaper in a fresh session.`
+        : 'So a long session costs more with every turn; a new task is cheaper in a fresh session.'
+    });
+  }
+  return insights;
+}
+
+function formatCount(value) {
+  if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (value >= 1e3) return `${Math.round(value / 1e3)}k`;
+  return String(Math.round(value));
 }
 
 function calendarDaysBetween(from, to) {

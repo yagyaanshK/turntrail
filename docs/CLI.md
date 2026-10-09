@@ -155,18 +155,26 @@ turntrail usage --prices ./prices.json
 ```
 
 Turntrail reads the token counts Claude Code and Codex record in their chats on this machine:
-every model reply carries the provider's own usage figures. Nothing is sent anywhere. Counts are
-kept in four parts, because they cost and count against limits differently: new input, cache
-writes, cache reads, and output. **Work** is new input + cache writes + output, what each turn
-added; **cache reads** are the conversation re-read from the prompt cache every turn, most of the
-raw total and far cheaper. Gemini and Cursor transcripts carry no token counts, so they are not
-included.
+every model reply carries the provider's own usage figures. Nothing is sent anywhere. Everything
+processed is split into four parts that add up to the total:
 
-The default view gives each agent's work for the last hour, today, 7 days and the range, its burn
-rate per hour over the last 24 hours, and its cache reads. `--days max` covers everything recorded.
-`--by day|model|project|account` breaks the range down instead; `--by model` lists every model
-used in the range. `--prices` takes JSON of US dollars per million tokens by model name or a
-prefix ending in `*` and adds an estimated cost.
+- **Output**: what the agent wrote, reasoning included.
+- **New input**: what it had not seen: your messages, files it read, tool results.
+- **Re-sent context**: the conversation sent again because the prompt cache had expired, usually
+  after a break in a long session. Little of it is new.
+- **Cache reads**: the conversation re-read from the cache on every turn. This is most of the
+  total, far cheaper per token, and grows with the length of a session rather than with how much
+  is written.
+
+Providers do not publish how subscription limits weigh these parts, so the total is labelled as
+what was processed, not as what counts against a limit; the limit projections use the usage the
+providers report. Gemini and Cursor transcripts carry no token counts, so they are not included.
+
+The default view gives each agent's total for today and the range, the range split into the four
+parts, and its burn rate per hour over the last 24 hours, followed by anything that stands out in
+the last week. `--days max` covers everything recorded. `--by day|model|project|account` breaks
+the range down instead; `--by model` lists every model used in the range. `--prices` takes JSON of
+US dollars per million tokens by model name or a prefix ending in `*` and adds an estimated cost.
 
 Codex is counted per turn, from each turn's own figure or its per-response record. Its running
 total is not used: a forked or resumed thread starts with its parent's total already in it, and

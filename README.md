@@ -256,17 +256,26 @@ normalized local ledger; native transcript paths are not sent into the webview.
 ## Usage statistics
 
 Turntrail reads the token counts Claude Code and Codex record in their chats on this machine:
-every model reply carries the provider's own usage figures. Nothing is sent anywhere. Counts are
-kept in four parts, because they cost and count against limits differently: new input, cache
-writes, cache reads, and output. **Work** is new input + cache writes + output, what each turn
-added; **cache reads** are the conversation re-read from the prompt cache every turn, most of the
-raw total and far cheaper. Gemini and Cursor transcripts carry no token counts, so they are not
-included.
+every model reply carries the provider's own usage figures. Nothing is sent anywhere. Everything
+processed is split into four parts that add up to the total:
 
-The **Usage Statistics** panel shows each agent's burn rate and daily use, projects every
-account's quota windows at the current pace, and ranks projects, models and accounts;
-`turntrail usage` prints the same figures. See [VS Code](docs/VS_CODE.md#the-usage-statistics-panel)
-and [CLI](docs/CLI.md#usage).
+- **Output**: what the agent wrote, reasoning included.
+- **New input**: what it had not seen: your messages, files it read, tool results.
+- **Re-sent context**: the conversation sent again because the prompt cache had expired, usually
+  after a break in a long session. Little of it is new.
+- **Cache reads**: the conversation re-read from the cache on every turn. This is most of the
+  total, far cheaper per token, and grows with the length of a session rather than with how much
+  is written.
+
+Providers do not publish how subscription limits weigh these parts, so the total is labelled as
+what was processed, not as what counts against a limit; the limit projections use the usage the
+providers report. Gemini and Cursor transcripts carry no token counts, so they are not included.
+
+The **Usage Statistics** panel leads with that total and its parts, points out what stands out in
+the last week with something to do about it, and keeps the details (usage over time by agent or
+model, limits at the current pace, the heaviest recent sessions, and breakdowns by agent, model,
+project and account) in sections that open on demand. `turntrail usage` prints the same figures.
+See [VS Code](docs/VS_CODE.md#the-usage-statistics-panel) and [CLI](docs/CLI.md#usage).
 
 ## Multiple accounts
 

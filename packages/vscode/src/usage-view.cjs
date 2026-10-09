@@ -164,7 +164,10 @@ function html(webview) {
      colour-blind separation is in the 6-8 band, legal with the segment gaps,
      legend, tooltip and table as second cues; two light slots are under 3:1,
      which the same text covers. */
+  /* The four parts: output, new input and re-sent context take three slots of
+     the validated set; cache reads are neutral, the bulk that matters least. */
   :root {
+    --p-output: #008300; --p-new: #4a3aa7; --p-resent: #e87ba4; --p-cache: #9a9a94;
     --m0: #eda100; --m1: #e87ba4; --m2: #008300; --m3: #4a3aa7; --m-other: #8f8f8a;
     --line: var(--vscode-panel-border, rgba(128,128,128,0.28));
     --dim: var(--vscode-descriptionForeground);
@@ -174,6 +177,7 @@ function html(webview) {
     --surface: var(--vscode-sideBar-background, #f8f8f8);
   }
   body.vscode-dark, body.vscode-high-contrast {
+    --p-output: #008300; --p-new: #9085e9; --p-resent: #d55181; --p-cache: #6f6f69;
     --m0: #c98500; --m1: #d55181; --m2: #008300; --m3: #9085e9; --m-other: #77776f;
     --series-codex: #3987e5;
     --series-claude: #d95926;
@@ -230,7 +234,41 @@ function html(webview) {
   .limit-note.warn { color: var(--vscode-editorWarning-foreground, #cca700); }
   .meter { height: 4px; background: var(--grid); border-radius: 2px; margin-top: 4px; overflow: hidden; }
   .meter > div { height: 100%; border-radius: 2px; }
-  .note { color: var(--dim); font-size: 0.82em; line-height: 1.45; margin-top: 14px; }
+  .note { color: var(--dim); font-size: 0.85em; line-height: 1.5; }
+  .note p { margin: 0 0 8px; }
+  .card { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; }
+  .headline .big { font-size: 2em; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; margin: 2px 0 4px; }
+  .by-agent { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.9em; margin-bottom: 10px; }
+  .by-agent span { display: inline-flex; align-items: center; gap: 5px; }
+  .compose { display: flex; gap: 2px; height: 10px; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+  .parts { display: grid; gap: 4px; margin-bottom: 8px; }
+  .part { display: grid; grid-template-columns: 10px 1fr auto 42px; gap: 8px; align-items: baseline; font-size: 0.9em; }
+  .part .swatch { align-self: center; }
+  .part-note { display: block; color: var(--dim); font-size: 0.85em; }
+  .num { font-variant-numeric: tabular-nums; text-align: right; }
+  .num.dim, .dim { color: var(--dim); }
+  .insight { border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700); }
+  .insight-title { color: var(--dim); font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+  .insight-item + .insight-item { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--grid); }
+  .insight-head { font-weight: 600; line-height: 1.4; margin-bottom: 2px; font-size: 0.95em; }
+  .insight-advice { color: var(--dim); line-height: 1.45; font-size: 0.92em; }
+  details.section { border-top: 1px solid var(--line); }
+  details.section:last-of-type { border-bottom: 1px solid var(--line); }
+  details.section > summary { display: flex; align-items: baseline; gap: 8px; padding: 8px 2px; cursor: pointer; list-style: none; }
+  details.section > summary::-webkit-details-marker { display: none; }
+  details.section > summary::before { content: '\u25B8'; color: var(--dim); width: 10px; font-size: 0.85em; transition: transform 0.12s; }
+  details.section[open] > summary::before { transform: rotate(90deg); }
+  .section-title { font-weight: 600; white-space: nowrap; }
+  .gist { margin-left: auto; color: var(--dim); font-size: 0.88em; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .gist .warn, .warn { color: var(--vscode-editorWarning-foreground, #cca700); }
+  .section-body { padding: 0 2px 12px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; margin-bottom: 8px; }
+  .hint { color: var(--dim); font-size: 0.85em; margin-bottom: 6px; }
+  .session { padding: 6px 0; border-bottom: 1px solid var(--grid); }
+  .session-top { display: flex; align-items: center; gap: 6px; }
+  .session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .session-top .num { margin-left: auto; white-space: nowrap; }
+  .session-meta { color: var(--dim); font-size: 0.82em; margin: 2px 0 0 16px; }
   .empty { color: var(--dim); line-height: 1.5; padding: 6px 0; }
   .error { color: var(--vscode-errorForeground); margin: 6px 0; }
   .link { background: none; border: 0; padding: 0; color: var(--vscode-textLink-foreground); cursor: pointer; font: inherit; font-size: 0.85em; }
@@ -243,7 +281,8 @@ const vscode = acquireVsCodeApi();
 const root = document.getElementById('root');
 const saved = vscode.getState() || {};
 let model = saved.model || null;
-let metric = saved.metric || 'work';
+let metric = saved.metric === 'work' ? 'work' : 'total';
+let open = saved.open || {};
 let showTable = Boolean(saved.showTable);
 let split = saved.split === 'model' ? 'model' : 'agent';
 let lastView = null;
@@ -255,7 +294,7 @@ const AGENTS = [
 ];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function persist() { vscode.setState({ model: model, metric: metric, showTable: showTable, split: split }); }
+function persist() { vscode.setState({ model: model, metric: metric, showTable: showTable, split: split, open: open }); }
 function esc(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
     return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
@@ -339,9 +378,9 @@ function buildView(summary) {
     series.forEach(function (s) {
       if (byModel) {
         const d = summary.modelSeries.daily[i];
-        values[s.key] = ((metric === 'work' ? d.work : d.cacheRead) || {})[s.key] || 0;
+        values[s.key] = ((metric === 'work' ? d.work : d.total) || {})[s.key] || 0;
       } else {
-        values[s.key] = p[s.key] ? (metric === 'work' ? p[s.key].work : p[s.key].cacheRead) : 0;
+        values[s.key] = p[s.key] ? (metric === 'work' ? p[s.key].work : p[s.key].total) : 0;
       }
     });
     return { day: p.day, values: values };
@@ -373,13 +412,14 @@ function buildView(summary) {
 function tiles(summary) {
   return '<div class="tiles">' + AGENTS.map(function (agent) {
     const w = summary.windows[agent.id];
-    const range = summary.daily.reduce(function (sum, p) { return sum + p[agent.id].work; }, 0);
+    const range = summary.daily.reduce(function (sum, p) { return sum + p[agent.id].total; }, 0);
+    const rangeOut = summary.daily.reduce(function (sum, p) { return sum + p[agent.id].output; }, 0);
     const label = summary.range && summary.range.max ? 'All time' : summary.days + ' days';
     return '<div class="agent"><div class="agent-head"><span class="swatch ' + agent.cls + '"></span>' + esc(agent.name) + '</div>' +
       '<div class="stats">' +
-        '<div><div class="stat-label">Today</div><div class="stat-value">' + fmt(w.today.work) + '</div><div class="stat-sub">' + fmt(w.today.cacheRead) + ' cache</div></div>' +
+        '<div><div class="stat-label">Today</div><div class="stat-value">' + fmt(w.today.total) + '</div><div class="stat-sub">' + fmt(w.today.output) + ' written</div></div>' +
         '<div><div class="stat-label">Per hour</div><div class="stat-value">' + fmt(summary.burnPerHour[agent.id]) + '</div><div class="stat-sub">last 24h</div></div>' +
-        '<div><div class="stat-label">' + label + '</div><div class="stat-value">' + fmt(range) + '</div><div class="stat-sub">' + fmt(w.last7.work) + ' in 7d</div></div>' +
+        '<div><div class="stat-label">' + label + '</div><div class="stat-value">' + fmt(range) + '</div><div class="stat-sub">' + fmt(rangeOut) + ' written</div></div>' +
       '</div></div>';
   }).join('') + '</div>';
 }
@@ -398,7 +438,7 @@ function chart(view) {
   const barW = Math.max(1, Math.min(24, band * 0.72));
   const y = function (v) { return top + plotH - (v / max) * plotH; };
   let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" height="' + height + '" role="img" aria-label="' +
-    esc((view.unit === 'day' ? 'Daily ' : view.unit === 'week' ? 'Weekly ' : 'Monthly ') + (metric === 'work' ? 'work tokens' : 'cache reads') + ' by ' + (split === 'model' ? 'model' : 'agent')) + '">';
+    esc((view.unit === 'day' ? 'Daily ' : view.unit === 'week' ? 'Weekly ' : 'Monthly ') + (metric === 'work' ? 'tokens without cache reads' : 'tokens') + ' by ' + (split === 'model' ? 'model' : 'agent')) + '">';
   [0, 0.5, 1].forEach(function (f) {
     const gy = y(max * f);
     svg += '<line class="grid" x1="' + left + '" x2="' + (width - right) + '" y1="' + gy + '" y2="' + gy + '"/>';
@@ -449,64 +489,135 @@ function dataTable(view) {
     }).join('') + '</tbody></table></div>';
 }
 
-function ranking(title, rows) {
+function ranking(rows) {
   if (!rows || !rows.length) return '';
-  return '<h3>' + esc(title) + '</h3><table><thead><tr><th>Name</th><th class="n">Work</th><th class="n">Cache</th></tr></thead><tbody>' +
+  const total = rows.reduce(function (s, r) { return s + r.total; }, 0) || 1;
+  return '<table><thead><tr><th>Name</th><th class="n">Tokens</th><th class="n">Share</th><th class="n">Written</th></tr></thead><tbody>' +
     rows.map(function (r) {
       const agent = AGENTS.find(function (a) { return a.id === r.agent; }) || AGENTS[0];
       return '<tr><td><div class="name"><span class="swatch ' + agent.cls + '" title="' + esc(agent.name) + '"></span><span>' + esc(r.label) + '</span></div></td>' +
-        '<td class="n">' + fmt(r.work) + '</td><td class="n">' + fmt(r.cacheRead) + '</td></tr>';
+        '<td class="n">' + fmt(r.total) + '</td><td class="n">' + pct(r.total, total) + '</td><td class="n">' + fmt(r.output) + '</td></tr>';
     }).join('') + '</tbody></table>';
 }
 
-// Every model used in the range, with its share of the range's work. The
-// swatch is the model's chart colour when it has its own series, otherwise
-// its agent's, and the agent is named under the model.
 function modelTable(summary) {
   const rows = summary.byModel || [];
   if (!rows.length) return '';
-  const total = rows.reduce(function (sum, r) { return sum + r.work; }, 0) || 1;
+  const total = rows.reduce(function (sum, r) { return sum + r.total; }, 0) || 1;
   const shown = summary.modelSeries ? summary.modelSeries.models : [];
   const slots = modelColors(shown);
-  return '<h3>Models · ' + esc(rangeLabel(summary)) + '</h3><table><thead><tr><th>Model</th><th class="n">Work</th><th class="n">Share</th><th class="n">Cache</th></tr></thead><tbody>' +
+  return '<table><thead><tr><th>Model</th><th class="n">Tokens</th><th class="n">Share</th><th class="n">Written</th></tr></thead><tbody>' +
     rows.map(function (r) {
       const agent = AGENTS.find(function (a) { return a.id === r.agent; }) || AGENTS[0];
       const color = slots[r.key] !== undefined ? 'var(--m' + slots[r.key] + ')' : agent.color;
-      const share = (r.work / total) * 100;
+      const share = (r.total / total) * 100;
       return '<tr><td><div class="name"><span class="swatch" style="background:' + color + '"></span><span>' + esc(r.label) +
         '<span class="agent-tag">' + esc(agent.name) + '</span></span></div>' +
         '<div class="share"><div style="width:' + share.toFixed(1) + '%;background:' + color + '"></div></div></td>' +
-        '<td class="n">' + fmt(r.work) + '</td><td class="n">' + (share >= 10 ? Math.round(share) : share.toFixed(1)) + '%</td><td class="n">' + fmt(r.cacheRead) + '</td></tr>';
+        '<td class="n">' + fmt(r.total) + '</td><td class="n">' + pct(r.total, total) + '</td><td class="n">' + fmt(r.output) + '</td></tr>';
     }).join('') + '</tbody></table>';
 }
 
 function limits(rows) {
   if (!rows || !rows.length) return '';
-  return '<h3>Limits at this pace</h3>' + rows.map(function (r) {
+  return rows.map(function (r) {
     const agent = AGENTS.find(function (a) { return a.id === r.agent; }) || AGENTS[0];
     let note;
-    if (r.exhausted) note = '<div class="limit-note warn">⚠ Limit reached. Resets in ' + until(r.resetsAt) + '.</div>';
-    else if (r.beforeReset) note = '<div class="limit-note warn">⚠ At this pace it runs out in ' + until(r.runsOutAt) + ', before it resets in ' + until(r.resetsAt) + '.</div>';
+    if (r.exhausted) note = '<div class="limit-note warn">\u26A0 Limit reached. Resets in ' + until(r.resetsAt) + '.</div>';
+    else if (r.beforeReset) note = '<div class="limit-note warn">\u26A0 At this pace it runs out in ' + until(r.runsOutAt) + ', before it resets in ' + until(r.resetsAt) + '.</div>';
     else note = '<div class="limit-note">On pace to last. Resets in ' + until(r.resetsAt) + '.</div>';
-    const pct = Math.max(0, Math.min(100, r.usedPercent));
-    return '<div class="limit"><div class="limit-top"><span class="swatch ' + agent.cls + '"></span><span>' + esc(r.account) + ' · ' + esc(r.window) + '</span>' +
-      '<span class="pct">' + Math.round(pct) + '% used</span></div>' +
-      '<div class="meter"><div style="width:' + pct + '%;background:' + agent.color + '"></div></div>' + note + '</div>';
+    const p = Math.max(0, Math.min(100, r.usedPercent));
+    return '<div class="limit"><div class="limit-top"><span class="swatch ' + agent.cls + '"></span><span>' + esc(r.account) + ' \u00B7 ' + esc(r.window) + '</span>' +
+      '<span class="pct">' + Math.round(p) + '% used</span></div>' +
+      '<div class="meter"><div style="width:' + p + '%;background:' + agent.color + '"></div></div>' + note + '</div>';
   }).join('');
 }
 
+const PARTS = [
+  { key: 'output', label: 'Output', color: 'var(--p-output)', note: 'what the agent wrote' },
+  { key: 'newInput', label: 'New input', color: 'var(--p-new)', note: 'your messages, files, tool results' },
+  { key: 'resent', label: 'Re-sent context', color: 'var(--p-resent)', note: 'the conversation sent again after the cache expired' },
+  { key: 'cacheRead', label: 'Cache reads', color: 'var(--p-cache)', note: 'the conversation re-read every turn' }
+];
+function rangeTotals(summary) {
+  const sum = { total: 0, output: 0, newInput: 0, resent: 0, cacheRead: 0 };
+  summary.daily.forEach(function (p) {
+    AGENTS.forEach(function (a) { Object.keys(sum).forEach(function (k) { sum[k] += p[a.id][k] || 0; }); });
+  });
+  return sum;
+}
+function pct(part, whole) {
+  if (!whole) return '0%';
+  const v = (100 * part) / whole;
+  return (v >= 10 ? Math.round(v) : v >= 1 ? v.toFixed(1) : v > 0 ? '<1' : '0') + '%';
+}
+function headline(summary) {
+  const sum = rangeTotals(summary);
+  const perAgent = AGENTS.map(function (a) {
+    const t = summary.daily.reduce(function (s, p) { return s + p[a.id].total; }, 0);
+    return '<span><i class="swatch ' + a.cls + '"></i>' + esc(a.name) + ' ' + fmt(t) + '</span>';
+  }).join('');
+  const burn = AGENTS.reduce(function (s, a) { return s + (summary.burnPerHour[a.id] || 0); }, 0);
+  const today = AGENTS.reduce(function (s, a) { return s + summary.windows[a.id].today.total; }, 0);
+  // Honest proportions; a part too small to see still gets a sliver, and its
+  // number is always in the legend.
+  const bar = PARTS.filter(function (p) { return sum[p.key] > 0; }).map(function (p) {
+    return '<div title="' + esc(p.label + ': ' + fmt(sum[p.key])) + '" style="flex:' + sum[p.key] + ' 0 2px;background:' + p.color + '"></div>';
+  }).join('');
+  const legend = PARTS.map(function (p) {
+    return '<div class="part"><i class="swatch" style="background:' + p.color + '"></i><span class="part-name">' + esc(p.label) +
+      '<span class="part-note">' + esc(p.note) + '</span></span><span class="num">' + fmt(sum[p.key]) + '</span><span class="num dim">' + pct(sum[p.key], sum.total) + '</span></div>';
+  }).join('');
+  return '<div class="card headline">' +
+    '<div class="stat-label">Tokens processed \u00B7 ' + esc(rangeLabel(summary)) + '</div>' +
+    '<div class="big">' + fmt(sum.total) + '</div>' +
+    '<div class="by-agent">' + perAgent + '</div>' +
+    '<div class="compose" role="img" aria-label="Share of each part">' + bar + '</div>' +
+    '<div class="parts">' + legend + '</div>' +
+    '<div class="stat-sub">Today ' + fmt(today) + ' \u00B7 ' + fmt(burn) + ' an hour over the last 24 hours</div>' +
+  '</div>';
+}
+
+function insightsBlock(insights) {
+  if (!insights || !insights.length) return '';
+  return '<div class="card insight"><div class="insight-title">What stands out</div>' + insights.map(function (i) {
+    return '<div class="insight-item"><div class="insight-head">' + esc(i.message) + '</div><div class="insight-advice">' + esc(i.advice) + '</div></div>';
+  }).join('') + '</div>';
+}
+
+function section(id, title, gist, body, defaultOpen) {
+  if (!body) return '';
+  const isOpen = open[id] === undefined ? Boolean(defaultOpen) : open[id];
+  return '<details class="section" data-section="' + id + '"' + (isOpen ? ' open' : '') + '><summary><span class="section-title">' + esc(title) + '</span>' +
+    '<span class="gist">' + gist + '</span></summary><div class="section-body">' + body + '</div></details>';
+}
+
+function sessionsBlock(rows) {
+  if (!rows || !rows.length) return '';
+  return '<div class="hint">Sessions used in the last 7 days, by the tokens one more turn re-reads. A new task is cheaper in a fresh session or a handoff.</div>' + rows.map(function (r) {
+    const agent = AGENTS.find(function (a) { return a.id === r.agent; }) || AGENTS[0];
+    return '<div class="session"><div class="session-top"><span class="swatch ' + agent.cls + '" title="' + esc(agent.name) + '"></span>' +
+      '<span class="session-title">' + esc(r.title || r.project) + '</span><span class="num">' + fmt(r.perTurn) + ' a turn</span></div>' +
+      '<div class="session-meta">' + esc(agent.name) + (r.title ? ' \u00B7 ' + esc(r.project) : '') + ' \u00B7 active ' + esc(ago(r.lastActive)) + '</div></div>';
+  }).join('');
+}
+function ago(iso) {
+  const minutes = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (!isFinite(minutes)) return 'some time ago';
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return minutes + 'm ago';
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? hours + 'h ago' : Math.round(hours / 24) + 'd ago';
+}
+
 function render() {
-  if (!model) { root.innerHTML = '<div class="empty">Reading token counts…</div>'; return; }
+  if (!model) { root.innerHTML = '<div class="empty">Reading token counts\u2026</div>'; return; }
   const days = model.days || 30;
   let html = '<div class="toolbar">' +
     '<div class="segments" role="group" aria-label="Range">' + [7, 30, 90, 'max'].map(function (d) {
       return '<button data-range="' + d + '" aria-pressed="' + (String(d) === String(days)) + '"' + (d === 'max' ? ' title="Everything recorded"' : '') + '>' + (d === 'max' ? 'Max' : d + 'd') + '</button>';
-    }).join('') + '</div>' +
-    '<div class="segments" role="group" aria-label="Measure">' +
-      '<button data-metric="work" aria-pressed="' + (metric === 'work') + '" title="New input, cache writes and output">Work</button>' +
-      '<button data-metric="cache" aria-pressed="' + (metric === 'cache') + '" title="The conversation re-read from the prompt cache each turn">Cache reads</button>' +
-    '</div><span class="spacer"></span>' +
-    (model.loading ? '<span class="stat-sub">Updating…</span>' : '') + '</div>';
+    }).join('') + '</div><span class="spacer"></span>' +
+    (model.loading ? '<span class="stat-sub">Updating\u2026</span>' : '') + '</div>';
   if (model.error) html += '<div class="error">' + esc(model.error) + '</div>';
   const summary = model.summary;
   if (!summary) {
@@ -516,26 +627,58 @@ function render() {
     root.innerHTML = html;
     return;
   }
-  html += tiles(summary);
+  html += headline(summary);
+  html += insightsBlock(summary.insights);
+
+  // Usage over time.
   lastView = buildView(summary);
-  const unitTitle = lastView.unit === 'day' ? 'Daily' : lastView.unit === 'week' ? 'Weekly' : 'Monthly';
-  html += '<div class="chart-head"><h3>' + unitTitle + ' ' + (metric === 'work' ? 'work' : 'cache reads') + ' · ' + esc(rangeLabel(summary)) + '</h3>' +
-    '<div class="segments" role="group" aria-label="Split by">' +
-      '<button data-split="agent" aria-pressed="' + (split === 'agent') + '">Agents</button>' +
-      '<button data-split="model" aria-pressed="' + (split === 'model') + '">Models</button>' +
-    '</div></div>';
-  html += showTable ? dataTable(lastView) : chart(lastView);
-  html += '<button class="link" data-act="table">' + (showTable ? 'Show as chart' : 'Show as table') + '</button>';
-  html += limits(model.limits);
+  const unitTitle = lastView.unit === 'day' ? 'day' : lastView.unit === 'week' ? 'week' : 'month';
+  const chartBody = '<div class="controls">' +
+      '<div class="segments" role="group" aria-label="Measure">' +
+        '<button data-metric="total" aria-pressed="' + (metric !== 'work') + '" title="Everything processed, cache reads included">All tokens</button>' +
+        '<button data-metric="work" aria-pressed="' + (metric === 'work') + '" title="New input, re-sent context and output">Without cache reads</button>' +
+      '</div>' +
+      '<div class="segments" role="group" aria-label="Split by">' +
+        '<button data-split="agent" aria-pressed="' + (split === 'agent') + '">Agents</button>' +
+        '<button data-split="model" aria-pressed="' + (split === 'model') + '">Models</button>' +
+      '</div></div>' +
+    (showTable ? dataTable(lastView) : chart(lastView)) +
+    '<button class="link" data-act="table">' + (showTable ? 'Show as chart' : 'Show as table') + '</button>';
+  html += section('time', 'Usage over time', 'by ' + unitTitle + ' \u00B7 ' + esc(rangeLabel(summary)), chartBody, true);
+
+  const limitRows = model.limits || [];
+  const atRisk = limitRows.filter(function (r) { return r.beforeReset || r.exhausted; }).length;
+  html += section('limits', 'Limits at this pace',
+    atRisk ? '<span class="warn">\u26A0 ' + atRisk + ' will run out before reset</span>' : 'all on pace', limits(limitRows), atRisk > 0);
+
+  const heavy = summary.heaviestSessions || [];
+  html += section('sessions', 'Heaviest recent sessions',
+    heavy.length ? esc((heavy[0].title || heavy[0].project).slice(0, 28)) + ' \u00B7 ' + fmt(heavy[0].perTurn) + ' a turn' : '', sessionsBlock(heavy), false);
+
+  const sum = rangeTotals(summary);
+  const lead = AGENTS.slice().sort(function (a, b) {
+    return summary.daily.reduce(function (s, p) { return s + p[b.id].total; }, 0) - summary.daily.reduce(function (s, p) { return s + p[a.id].total; }, 0);
+  })[0];
+  const leadTotal = summary.daily.reduce(function (s, p) { return s + p[lead.id].total; }, 0);
+  html += section('agents', 'By agent', esc(lead.name) + ' ' + pct(leadTotal, sum.total), tiles(summary), false);
+
+  const models = summary.byModel || [];
+  html += section('models', 'Models', models.length ? models.length + ' \u00B7 ' + esc(models[0].label) + ' ' + pct(models[0].total, sum.total) : '', modelTable(summary), false);
+  const projects = summary.byProject || [];
+  html += section('projects', 'Projects', projects.length ? esc(projects[0].label) + ' ' + pct(projects[0].total, sum.total) : '', ranking(projects), false);
+  const accounts = summary.byAccount || [];
+  html += section('accounts', 'Accounts', accounts.length ? esc(accounts[0].label) + ' ' + pct(accounts[0].total, sum.total) : '', ranking(accounts), false);
   if (model.cost) {
-    html += '<h3>Estimated cost</h3><div>US$' + model.cost.total.toFixed(2) + ' over ' + esc(rangeLabel(summary)) + ' at your prices' +
-      (model.cost.unpriced.length ? '<div class="stat-sub">No price set for ' + esc(model.cost.unpriced.join(', ')) + '.</div>' : '') + '</div>';
+    html += section('cost', 'Estimated cost', 'US$' + model.cost.total.toFixed(2),
+      '<div>US$' + model.cost.total.toFixed(2) + ' over ' + esc(rangeLabel(summary)) + ' at your prices.' +
+      (model.cost.unpriced.length ? '<div class="stat-sub">No price set for ' + esc(model.cost.unpriced.join(', ')) + '.</div>' : '') + '</div>', false);
   }
-  html += ranking('Projects', summary.byProject);
-  html += modelTable(summary);
-  html += ranking('Accounts', summary.byAccount);
-  html += '<div class="note">Work is new input, cache writes and output. Cache reads are the conversation re-read from the prompt cache each turn: most of the raw count, and far cheaper. Read from the chats Claude Code and Codex write on this machine; nothing is sent anywhere.' +
-    (summary.scannedAt ? ' Updated ' + new Date(summary.scannedAt).toLocaleTimeString() + '.' : '') + '</div>';
+  html += section('about', 'What these numbers mean', '', '<div class="note">' +
+    '<p><b>Output</b> is what the agent wrote, reasoning included. <b>New input</b> is what it had not seen: your messages, files it read, tool results. ' +
+    '<b>Re-sent context</b> is the conversation sent again because the prompt cache had expired, usually after a break; little of it is new. ' +
+    '<b>Cache reads</b> are the conversation re-read from the cache on every turn: most of the total, far cheaper per token, and growing with the length of a session rather than with how much gets written.</p>' +
+    '<p>Providers do not publish how subscription limits weigh these parts; <b>Limits at this pace</b> uses the usage they report. Counts come from the chats Claude Code and Codex write on this machine; nothing is sent anywhere.' +
+    (summary.scannedAt ? ' Updated ' + new Date(summary.scannedAt).toLocaleTimeString() + '.' : '') + '</p></div>', false);
   root.innerHTML = html;
 }
 
@@ -586,6 +729,11 @@ root.addEventListener('click', function (event) {
   if (act.getAttribute('data-act') === 'table') { showTable = !showTable; persist(); render(); return; }
   if (act.getAttribute('data-act') === 'refresh') vscode.postMessage({ type: 'refresh' });
 });
+// Opening or closing a section is remembered. The event does not bubble.
+root.addEventListener('toggle', function (event) {
+  const node = event.target;
+  if (node && node.getAttribute && node.getAttribute('data-section')) { open[node.getAttribute('data-section')] = node.open; persist(); }
+}, true);
 window.addEventListener('message', function (event) {
   if (event.data && event.data.type === 'state') { model = event.data.model; persist(); render(); }
 });

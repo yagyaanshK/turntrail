@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { estimateUsageCost, projectLimitWindow, readUsageIndex, scanUsage, summarizeUsage } from '../src/index.js';
+import { estimateUsageCost, projectLimitWindow, readUsageIndex, scanUsage, summarizeUsage, usageInsights } from '../src/index.js';
 
 delete process.env.CLAUDE_CONFIG_DIR;
 delete process.env.CODEX_HOME;
@@ -258,4 +258,61 @@ test('day lists follow the calendar, not 24-hour steps', async () => {
     const [a, b] = [days[i - 1], days[i]].map((day) => new Date(`${day}T12:00:00`));
     assert.equal(Math.round((b - a) / 86400000), 1, `${days[i - 1]} is followed by the next day`);
   }
+});
+
+test('a call that re-caches the conversation is re-sent context, and a pause before it is noted', async () => {
+  const { claude, options } = await sandbox();
+  const reply = (id, minutesAgo, usage) => claudeReply(id, new Date(NOON.getTime() - minutesAgo * 60000).toISOString(), usage);
+  await fs.writeFile(path.join(claude, 'long.jsonl'), jsonl([
+    { type: 'assistant', aiTitle: 'Long <session>', timestamp: at(3) },
+    // Normal turns: small new input on a large cached conversation.
+    reply('a', 120, { input_tokens: 3, cache_creation_input_tokens: 2000, cache_read_input_tokens: 100000, output_tokens: 500 }),
+    reply('b', 119, { input_tokens: 3, cache_creation_input_tokens: 3000, cache_read_input_tokens: 102000, output_tokens: 400 }),
+    // After a 60-minute break the cache has gone: the whole conversation is written again.
+    reply('c', 59, { input_tokens: 3, cache_creation_input_tokens: 105000, cache_read_input_tokens: 0, output_tokens: 300 }),
+    // Mid-session miss, no pause.
+    reply('d', 58, { input_tokens: 3, cache_creation_input_tokens: 106000, cache_read_input_tokens: 0, output_tokens: 200 }),
+    // A small conversation: a miss there is not worth flagging.
+    reply('e', 57, { input_tokens: 3, cache_creation_input_tokens: 9000, cache_read_input_tokens: 0, output_tokens: 100 })
+  ]));
+  const summary = summarizeUsage(await scanUsage(options), { now: options.now, days: 7 });
+  const t = summary.totals.claude;
+  assert.equal(t.resent, 105000 + 106000);
+  assert.equal(t.resentAfterPause, 105000);
+  assert.equal(t.newInput, 15 + 2000 + 3000 + 9000);
+  assert.equal(t.output, 1500);
+  assert.equal(t.total, t.output + t.newInput + t.resent + t.cacheRead, 'the four parts add up to the total');
+
+  const [session] = summary.heaviestSessions;
+  assert.equal(session.title, 'Long <session>');
+  assert.equal(session.perTurn, 9003, 'what the last call carried');
+  assert.equal(session.calls, 5);
+});
+
+test('insights speak only when the numbers support them', () => {
+  const week = (overrides) => ({ last7: { total: 0, cacheRead: 0, newInput: 0, resent: 0, resentAfterPause: 0, ...overrides } });
+  // Re-sent context dominating input, mostly after pauses; cache reads 90% of the total.
+  const insights = usageInsights({
+    claude: week({ total: 100e6, cacheRead: 90e6, newInput: 3e6, resent: 7e6, resentAfterPause: 6e6 }),
+    codex: week({ total: 10e6, cacheRead: 9e6, newInput: 1e6, resent: 0 })
+  }, [{ agent: 'claude', title: 'Big chat', project: 'p', perTurn: 872000 }]);
+  assert.deepEqual(insights.map((i) => i.kind), ['resent', 'cacheReads']);
+  assert.match(insights[0].message, /^Re-sent context was 70% of Claude Code's input this week/);
+  assert.match(insights[0].advice, /after a break/);
+  assert.match(insights[1].message, /^90% of this week's tokens were cache reads/);
+  assert.match(insights[1].advice, /"Big chat", carries 872k tokens a turn/);
+
+  // Mid-session misses get different advice; small amounts say nothing.
+  const midSession = usageInsights({ claude: week({ total: 20e6, cacheRead: 5e6, newInput: 3e6, resent: 7e6, resentAfterPause: 1e6 }) });
+  assert.match(midSession[0].advice, /mid-session/);
+  assert.deepEqual(usageInsights({ claude: week({ total: 2e6, cacheRead: 1e6, newInput: 1e5, resent: 9e5 }) }), []);
+});
+
+test('heaviest sessions are the ones still in use this week', async () => {
+  const { claude, options } = await sandbox();
+  const big = { input_tokens: 3, cache_creation_input_tokens: 1000, cache_read_input_tokens: 400000, output_tokens: 10 };
+  await fs.writeFile(path.join(claude, 'old.jsonl'), jsonl([claudeReply('old', at(24 * 20), big)]));
+  await fs.writeFile(path.join(claude, 'recent.jsonl'), jsonl([claudeReply('new', at(2), { ...big, cache_read_input_tokens: 100000 })]));
+  const summary = summarizeUsage(await scanUsage(options), { now: options.now, days: 30 });
+  assert.deepEqual(summary.heaviestSessions.map((s) => s.perTurn), [101003], 'the bigger session was last used 20 days ago');
 });

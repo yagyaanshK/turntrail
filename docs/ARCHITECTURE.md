@@ -471,6 +471,18 @@ is counted per turn: `last_token_usage` on `token_count` events whose running to
 forked or resumed thread inherits its parent's. When a thread starts writing records part-way,
 the turn figure written just before the first record is the same turn and is taken back out.
 
+Each call is also classified. Its context is everything it carried (for Claude input, cache writes
+and cache reads; for Codex, input including cached). A call whose context is at least 20,000
+tokens and more than half of it uncached re-sent the conversation after a cache miss; that part is
+kept as `resent` in bucket slot 5, and in slot 6 as well when more than five minutes passed since
+the previous call in the file. The summary's four disjoint parts are then output, new input
+(uncached input and cache writes minus re-sent), re-sent and cache reads, and `total` is their sum.
+Each file also keeps the context of its latest call and its name (Claude's `aiTitle`, Codex's
+thread name from `session_index.jsonl`), which give `heaviestSessions`: sessions used in the last
+seven days by what one more turn re-reads. `usageInsights` turns the last week into at most two
+findings, each with advice, and only when the numbers cross a threshold (re-sent context at least
+40% of an agent's input; cache reads at least 80% of the total).
+
 `summarizeUsage` turns the index into per-agent windows (last hour, 24 hours, today, 7 and 30
 days), a burn rate, a daily series and rankings. `days: 'max'` runs from the first day with any
 usage. `modelSeries` splits the daily series by model: the four models with the most work in the

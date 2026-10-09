@@ -221,6 +221,7 @@ export {
   readUsageIndex,
   scanUsage,
   summarizeUsage,
+  usageInsights,
   usageIndexPath,
   usageLocations,
   DEFAULT_USAGE_DAYS,

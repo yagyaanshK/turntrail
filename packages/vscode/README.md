@@ -76,9 +76,11 @@ a machine/editor that fully stopped it, must be resumed again.
 ## Usage Statistics
 
 A third panel shows token use across Claude Code and Codex, read from the chats they write on this
-machine: each agent's burn rate, today and the last 7, 30 or 90 days, a daily chart, when each
-account's limits will run out at the current pace, use by model, and the biggest projects and
-accounts. The range goes up to **Max**, everything recorded.
+machine. It leads with the total processed, split into what the agent wrote, new input, context
+re-sent after a cache expired, and cache reads, and points out what stands out in the last week with
+something to do about it. Usage over time by agent or model, when each account's limits will run out
+at the current pace, the chats that cost most to continue, and breakdowns by model, project and
+account sit in sections that open on demand. The range goes up to **Max**, everything recorded.
 Nothing is sent anywhere. The first open reads your history once in the background; after that only
 new lines are read.
 

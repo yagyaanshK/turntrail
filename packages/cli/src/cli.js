@@ -69,7 +69,7 @@ Usage options:
                           Adds an estimated cost; Turntrail ships no prices.
   --json                  Emit the full summary as JSON.
   Token figures come from the transcripts Claude Code and Codex write on this
-  machine; nothing is sent anywhere. Work is new input + cache writes + output.
+  machine; nothing is sent anywhere.
 
 Export options:
   --max-chars <n>         Character budget for the transcript (default 120000, 0 = off).
@@ -568,34 +568,44 @@ const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex' };
 
 export function renderUsage(summary, by = 'agent', cost) {
   const span = summary.range.max ? `all time, ${summary.days} days` : `last ${summary.days} days`;
-  const lines = [`Token use, ${span} (${summary.range.from} to ${summary.range.to})`, ''];
+  const lines = [`Tokens processed, ${span} (${summary.range.from} to ${summary.range.to})`, ''];
   const table = (header, rows) => {
     const widths = header.map((cell, i) => Math.max(cell.length, ...rows.map((row) => String(row[i]).length)));
     const line = (row) => row.map((cell, i) => (i === 0 ? String(cell).padEnd(widths[i]) : String(cell).padStart(widths[i]))).join('  ');
     lines.push(line(header), ...rows.map(line), '');
   };
+  const sumOf = (agent, key) => summary.daily.reduce((sum, point) => sum + (point[agent][key] || 0), 0);
   if (by === 'day') {
-    table(['Day', 'Claude work', 'Codex work', 'Claude cache', 'Codex cache'], summary.daily.map((point) => [
-      point.day, formatTokens(point.claude.work), formatTokens(point.codex.work), formatTokens(point.claude.cacheRead), formatTokens(point.codex.cacheRead)
+    table(['Day', 'Claude Code', 'Codex', 'Claude written', 'Codex written'], summary.daily.map((point) => [
+      point.day, formatTokens(point.claude.total), formatTokens(point.codex.total), formatTokens(point.claude.output), formatTokens(point.codex.output)
     ]));
   } else if (by === 'model' || by === 'project' || by === 'account') {
     const rows = { model: summary.byModel, project: summary.byProject, account: summary.byAccount }[by];
-    table([by[0].toUpperCase() + by.slice(1), 'Agent', 'Work', 'Cache reads', 'Calls'], rows.map((row) => [
-      row.label, AGENT_NAMES[row.agent] || row.agent, formatTokens(row.work), formatTokens(row.cacheRead), row.calls
+    table([by[0].toUpperCase() + by.slice(1), 'Agent', 'Tokens', 'Written', 'Re-sent', 'Calls'], rows.map((row) => [
+      row.label, AGENT_NAMES[row.agent] || row.agent, formatTokens(row.total), formatTokens(row.output), formatTokens(row.resent), row.calls
     ]));
   } else {
-    table(['Agent', 'Last hour', 'Today', '7 days', summary.range.max ? 'All time' : `${summary.days} days`, 'Per hour (24h)', 'Cache reads'], ['claude', 'codex'].map((agent) => {
-      const w = summary.windows[agent];
-      const range = summary.daily.reduce((sum, point) => sum + point[agent].work, 0);
-      const cache = summary.daily.reduce((sum, point) => sum + point[agent].cacheRead, 0);
-      return [AGENT_NAMES[agent], formatTokens(w.lastHour.work), formatTokens(w.today.work), formatTokens(w.last7.work), formatTokens(range), formatTokens(summary.burnPerHour[agent]), formatTokens(cache)];
-    }));
+    table(['Agent', 'Today', summary.range.max ? 'All time' : `${summary.days} days`, 'Output', 'New input', 'Re-sent', 'Cache reads', 'Per hour'], ['claude', 'codex'].map((agent) => [
+      AGENT_NAMES[agent],
+      formatTokens(summary.windows[agent].today.total),
+      formatTokens(sumOf(agent, 'total')),
+      formatTokens(sumOf(agent, 'output')),
+      formatTokens(sumOf(agent, 'newInput')),
+      formatTokens(sumOf(agent, 'resent')),
+      formatTokens(sumOf(agent, 'cacheRead')),
+      formatTokens(summary.burnPerHour[agent])
+    ]));
   }
   if (cost) {
     lines.push(`Estimated cost at the prices given: US$${cost.total.toFixed(2)} across ${cost.priced} model(s)` +
       (cost.unpriced.length ? `; no price for ${cost.unpriced.join(', ')}` : ''), '');
   }
-  lines.push('Work is new input + cache writes + output. Cache reads are the conversation re-read each turn.', '');
+  for (const insight of summary.insights || []) lines.push(`* ${insight.message} ${insight.advice}`, '');
+  lines.push(
+    'Output is what the agent wrote. New input is what it had not seen. Re-sent is the conversation sent',
+    'again after the cache expired. Cache reads are the conversation re-read every turn.',
+    ''
+  );
   return lines.join('\n');
 }
 

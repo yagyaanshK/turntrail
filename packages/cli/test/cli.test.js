@@ -145,28 +145,30 @@ test('parent signals are forwarded once and listeners are removed after exit', a
   assert.equal(parent.listenerCount('SIGTERM'), 0);
 });
 
-test('usage renders a burn summary per agent and a breakdown on request', async () => {
+test('usage renders the total in four parts per agent, insights, and a breakdown on request', async () => {
   const { renderUsage } = await import('../src/cli.js');
-  const parts = (work, cacheRead = 0) => ({ fresh: work, cacheWrite: 0, cacheRead, output: 0, calls: 1, work });
-  const windows = () => ({ lastHour: parts(1_200), today: parts(3_400_000), last7: parts(17_600_000), last24h: parts(0), last30: parts(0) });
+  const parts = (output, newInput, resent, cacheRead) => ({ output, newInput, resent, cacheRead, total: output + newInput + resent + cacheRead, calls: 1 });
+  const windows = () => ({ today: parts(1e5, 2e5, 1e5, 3.1e6), last7: parts(0, 0, 0, 0), lastHour: parts(0, 0, 0, 0), last24h: parts(0, 0, 0, 0), last30: parts(0, 0, 0, 0) });
   const summary = {
     days: 2,
     range: { from: '2026-10-08', to: '2026-10-09' },
     windows: { claude: windows(), codex: windows() },
     burnPerHour: { claude: 165_000, codex: 684_000 },
     daily: [
-      { day: '2026-10-08', claude: parts(1_000_000, 5e7), codex: parts(2_000_000, 9e7) },
-      { day: '2026-10-09', claude: parts(2_500_000, 5e7), codex: parts(0) }
+      { day: '2026-10-08', claude: parts(1e6, 2e6, 3e6, 94e6), codex: parts(2e6, 0, 0, 98e6) },
+      { day: '2026-10-09', claude: parts(0, 0, 0, 0), codex: parts(0, 0, 0, 0) }
     ],
-    byModel: [{ agent: 'codex', label: 'gpt-6.1-sol', work: 25_200_000, cacheRead: 545_000_000, calls: 3646 }],
+    byModel: [{ agent: 'codex', label: 'gpt-6.1-sol', total: 578e6, output: 2.6e6, resent: 9.1e6, calls: 3706 }],
     byProject: [],
-    byAccount: []
+    byAccount: [],
+    insights: [{ message: 'Re-sent context was 69% of input.', advice: 'Start a fresh session after a break.' }]
   };
   const text = renderUsage(summary);
-  assert.match(text, /^Token use, last 2 days \(2026-10-08 to 2026-10-09\)/);
-  assert.match(text, /Claude Code\s+1k\s+3\.4M\s+17\.6M\s+3\.5M\s+165k\s+100M/);
-  assert.match(text, /Codex\s+1k\s+3\.4M\s+17\.6M\s+2\.0M\s+684k\s+90\.0M/);
-  assert.match(renderUsage(summary, 'model'), /gpt-6\.1-sol\s+Codex\s+25\.2M\s+545M\s+3646/);
-  assert.match(renderUsage(summary, 'day'), /2026-10-09\s+2\.5M\s+0/);
+  assert.match(text, /^Tokens processed, last 2 days \(2026-10-08 to 2026-10-09\)/);
+  assert.match(text, /Claude Code\s+3\.5M\s+100M\s+1\.0M\s+2\.0M\s+3\.0M\s+94\.0M\s+165k/);
+  assert.match(text, /Codex\s+3\.5M\s+100M\s+2\.0M\s+0\s+0\s+98\.0M\s+684k/);
+  assert.match(text, /\* Re-sent context was 69% of input\. Start a fresh session after a break\./);
+  assert.match(renderUsage(summary, 'model'), /gpt-6\.1-sol\s+Codex\s+578M\s+2\.6M\s+9\.1M\s+3706/);
+  assert.match(renderUsage(summary, 'day'), /2026-10-08\s+100M\s+100M\s+1\.0M\s+2\.0M/);
   assert.match(renderUsage(summary, 'agent', { total: 12.345, priced: 1, unpriced: ['gpt-6.1-sol'] }), /US\$12\.35 across 1 model\(s\); no price for gpt-6\.1-sol/);
 });

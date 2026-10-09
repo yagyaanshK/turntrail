@@ -86,23 +86,37 @@ off to Claude or Codex, but Turntrail does not yet open or inject prompts into G
 ## The Usage Statistics Panel
 
 Turntrail reads the token counts Claude Code and Codex record in their chats on this machine:
-every model reply carries the provider's own usage figures. Nothing is sent anywhere. Counts are
-kept in four parts, because they cost and count against limits differently: new input, cache
-writes, cache reads, and output. **Work** is new input + cache writes + output, what each turn
-added; **cache reads** are the conversation re-read from the prompt cache every turn, most of the
-raw total and far cheaper. Gemini and Cursor transcripts carry no token counts, so they are not
-included.
+every model reply carries the provider's own usage figures. Nothing is sent anywhere. Everything
+processed is split into four parts that add up to the total:
 
-The panel shows, per agent, today's work, the burn rate (work per hour over the last 24 hours) and
-the selected range; a stacked chart for 7, 30 or 90 days or **Max**, everything recorded, as work
-or as cache reads, with a tooltip and a table view. Over 120 days the bars group into weeks, and
-over two years into months. The chart splits by **Agents** or by **Models**: by model it shows the
-four models with the most work in the range and folds the rest into "Other", each model keeping its
-colour across ranges. A **Models** table lists every model used in the range with its agent, work,
-share and cache reads. Then **Limits at this pace**, which projects each
-account's quota windows from how fast each has been used so far and warns when one will run out
-before it resets; and the biggest projects, models and accounts. An optional estimated cost appears
-when `turntrail.usagePrices` gives prices per million tokens; Turntrail ships none.
+- **Output**: what the agent wrote, reasoning included.
+- **New input**: what it had not seen: your messages, files it read, tool results.
+- **Re-sent context**: the conversation sent again because the prompt cache had expired, usually
+  after a break in a long session. Little of it is new.
+- **Cache reads**: the conversation re-read from the cache on every turn. This is most of the
+  total, far cheaper per token, and grows with the length of a session rather than with how much
+  is written.
+
+Providers do not publish how subscription limits weigh these parts, so the total is labelled as
+what was processed, not as what counts against a limit; the limit projections use the usage the
+providers report. Gemini and Cursor transcripts carry no token counts, so they are not included.
+
+The panel leads with one card: the total for the range, each agent's share, the four parts as a
+bar with their figures, and today's total and burn rate. Under it, **What stands out** appears only
+when the last week supports it: when re-sent context is 40% or more of an agent's input, saying
+whether it followed breaks or happened mid-session, and when cache reads are 80% or more of the
+total, naming the session that costs most to continue. Each comes with something to do.
+
+Everything else is in sections that show a one-line summary when closed and remember being
+opened. **Usage over time** is a stacked chart for 7, 30 or 90 days or **Max**, of all tokens or
+without cache reads, split by **Agents** or **Models**, with a tooltip and a table view; over 120
+days it groups into weeks, over two years into months. By model it shows the four models with the
+most tokens in the range and folds the rest into "Other", each keeping its colour across ranges.
+**Limits at this pace** projects each account's quota windows from how fast each has been used so
+far, and opens itself when one will run out before it resets. **Heaviest recent sessions** lists
+chats used in the last week by the tokens one more turn re-reads. **By agent**, **Models**,
+**Projects** and **Accounts** break the range down, and an optional estimated cost appears when
+`turntrail.usagePrices` gives prices per million tokens; Turntrail ships none.
 
 The first open reads every transcript once, in a background worker so the rest of Turntrail stays
 responsive; a long history takes about a minute. An index of hourly totals is kept in
