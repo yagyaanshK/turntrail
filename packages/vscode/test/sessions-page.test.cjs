@@ -40,6 +40,8 @@ function pageScript() {
 // Just enough page for the script: a root whose markup can be read back, a
 // search box that can hold focus and a caret, and the message channel.
 function page(state = {}) {
+  const sent = [];
+  const saved = [];
   const rootListeners = {};
   const windowListeners = {};
   const search = {
@@ -59,13 +61,15 @@ function page(state = {}) {
   };
   const document = { getElementById: () => root, activeElement: { classList: { contains: () => false } } };
   const context = vm.createContext({
-    acquireVsCodeApi: () => ({ getState: () => state, setState() {}, postMessage() {} }),
+    acquireVsCodeApi: () => ({ getState: () => state, setState(next) { saved.push(next); }, postMessage(message) { sent.push(message); } }),
     document,
     window: { addEventListener(type, listener) { windowListeners[type] = listener; } },
     console
   });
   new vm.Script(pageScript()).runInContext(context);
   return {
+    sent,
+    saved,
     root,
     search,
     document,
@@ -101,4 +105,15 @@ test('an empty list says where the sessions are instead of that nothing matches'
 
   view.type('sor');
   assert.match(view.root.innerHTML, /No sessions match this search\./);
+});
+
+test('the Sessions page asks for its state once it is listening, and keeps it for next time', () => {
+  const view = page();
+  assert.equal(JSON.stringify(view.sent), JSON.stringify([{ type: 'ready' }]));
+  view.state({ sessions: [], managed: [], providers: [], all: true, loading: false, errors: [] });
+  assert.equal(view.saved.at(-1).model.all, true);
+
+  // Shown again, the page draws what it last had before the host answers.
+  const reopened = page({ model: { sessions: [], managed: [], providers: [], all: true, loading: false, errors: [] } });
+  assert.match(reopened.root.innerHTML, /No sessions were found on this machine./);
 });

@@ -375,6 +375,14 @@ class AccountsWebview {
     view.webview.html = html(view.webview);
 
     view.webview.onDidReceiveMessage((message) => {
+      // The page says when it is listening. VS Code rebuilds a view's page
+      // each time it is shown again, and the state posted below can arrive
+      // before the new page's script runs; that message is simply lost and the
+      // panel stayed on "Loading subscriptions…". Answering this cannot be.
+      if (message?.type === 'ready') {
+        this.store.viewModel().then((model) => this.post(model, { force: true })).catch(() => {});
+        return;
+      }
       const commands = {
         switch: 'turntrail.switchAccount',
         signin: 'turntrail.signInAccount',
@@ -428,8 +436,8 @@ class AccountsWebview {
     this.store.reloadStaleUsage().catch(() => this.store.refresh());
   }
 
-  post(model) {
-    if (!this.view?.visible) return;
+  post(model, options = {}) {
+    if (!this.view || (!this.view.visible && !options.force)) return;
     let maintenance;
     try {
       maintenance = this.options.maintenance?.();
@@ -1152,7 +1160,7 @@ document.addEventListener('click', (event) => {
     if (choose.dataset.choose === 'target') handoffTarget = choose.dataset.value;
     else handoffMode = choose.dataset.value;
     // Remember across a panel reload, which happens whenever the view is hidden.
-    vscode.setState({ handoffTarget, handoffMode });
+    vscode.setState({ ...(vscode.getState() || {}), handoffTarget, handoffMode });
     if (lastModel) render(lastModel);
     return;
   }
@@ -1175,6 +1183,9 @@ window.addEventListener('message', (event) => {
   if (event.data?.type === 'state') {
     lastModel = event.data.model;
     render(lastModel);
+    // Kept with the page's state, so a view shown again draws at once from
+    // what it last showed instead of waiting on a loading line.
+    vscode.setState({ ...(vscode.getState() || {}), model: lastModel });
   }
 });
 
@@ -1182,7 +1193,13 @@ const saved = vscode.getState();
 if (saved) {
   handoffTarget = saved.handoffTarget || handoffTarget;
   handoffMode = saved.handoffMode || handoffMode;
+  if (saved.model && !lastModel) {
+    lastModel = saved.model;
+    render(lastModel);
+  }
 }
+// Last, once the listener above exists: ask for the current state.
+vscode.postMessage({ type: 'ready' });
 </script>
 </body>
 </html>`;

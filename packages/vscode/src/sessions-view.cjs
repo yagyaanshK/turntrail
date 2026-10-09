@@ -120,6 +120,12 @@ class SessionsWebview {
     view.webview.options = { enableScripts: true };
     view.webview.html = html(view.webview);
     view.webview.onDidReceiveMessage((message) => {
+      // The page says when it is listening; see the Accounts view for why a
+      // state posted before then can be lost.
+      if (message?.type === 'ready') {
+        this.post(this.store.viewModel(), { force: true });
+        return;
+      }
       const commands = {
         refresh: 'turntrail.refreshSessions',
         scope: 'turntrail.refreshSessions',
@@ -149,8 +155,8 @@ class SessionsWebview {
     this.store.refresh().catch(() => {});
   }
 
-  post(model) {
-    if (this.view?.visible !== false) this.view?.webview.postMessage({ type: 'state', model });
+  post(model, options = {}) {
+    if (this.view?.visible !== false || options.force) this.view?.webview.postMessage({ type: 'state', model });
   }
 }
 
@@ -388,7 +394,7 @@ function card(row) {
   '</article>';
 }
 function persist() {
-  vscode.setState({ query: query, provider: provider, openHandoff: openHandoff, target: target, mode: mode, delivery: delivery });
+  vscode.setState({ query: query, provider: provider, openHandoff: openHandoff, target: target, mode: mode, delivery: delivery, model: model });
 }
 function render() {
   const needle = query.trim().toLowerCase();
@@ -473,9 +479,12 @@ root.addEventListener('click', function (event) {
   vscode.postMessage({ type: button.dataset.act, id: button.dataset.id });
 });
 window.addEventListener('message', function (event) {
-  if (event.data && event.data.type === 'state') { model = event.data.model; render(); }
+  if (event.data && event.data.type === 'state') { model = event.data.model; persist(); render(); }
 });
+if (saved.model) model = saved.model;
 render();
+// Last, once the listener above exists: ask for the current state.
+vscode.postMessage({ type: 'ready' });
 </script>
 </body>
 </html>`;

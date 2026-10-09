@@ -158,3 +158,27 @@ test('the keep-chats button runs its command', async () => {
   message({ type: 'keepClaudeChats' });
   assert.deepEqual(executed.map((call) => call[0]), ['turntrail.keepClaudeChats']);
 });
+
+test('a rebuilt Accounts page that missed the first state asks for it and gets it', async () => {
+  // Reproduces the panel stuck on "Loading subscriptions…": the view is
+  // resolved while not yet visible, so the first state goes nowhere, and only
+  // the page's "ready" brings the data.
+  const panel = new AccountsWebview(fakeStore({ sections: [{ id: 'codex', rows: [] }] }));
+  const { view, posted, message } = fakeView();
+  view.visible = false;
+  await panel.resolveWebviewView(view);
+  assert.equal(posted.length, 0, 'nothing could be delivered yet');
+
+  message({ type: 'ready' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].type, 'state');
+  assert.deepEqual(posted[0].model.sections, [{ id: 'codex', rows: [] }]);
+});
+
+test('the Accounts page script announces itself once its listener exists', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'accounts-view.cjs'), 'utf8');
+  const listener = source.indexOf("window.addEventListener('message'");
+  const ready = source.indexOf("vscode.postMessage({ type: 'ready' })");
+  assert.ok(listener > 0 && ready > listener, 'ready is sent after the message listener is registered');
+});
