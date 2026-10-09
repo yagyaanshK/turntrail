@@ -94,8 +94,12 @@ raw total and far cheaper. Gemini and Cursor transcripts carry no token counts, 
 included.
 
 The panel shows, per agent, today's work, the burn rate (work per hour over the last 24 hours) and
-the selected range; a daily stacked chart of both agents for 7, 30 or 90 days, as work or as cache
-reads, with a per-day tooltip and a table view; **Limits at this pace**, which projects each
+the selected range; a stacked chart for 7, 30 or 90 days or **Max**, everything recorded, as work
+or as cache reads, with a tooltip and a table view. Over 120 days the bars group into weeks, and
+over two years into months. The chart splits by **Agents** or by **Models**: by model it shows the
+four models with the most work in the range and folds the rest into "Other", each model keeping its
+colour across ranges. A **Models** table lists every model used in the range with its agent, work,
+share and cache reads. Then **Limits at this pace**, which projects each
 account's quota windows from how fast each has been used so far and warns when one will run out
 before it resets; and the biggest projects, models and accounts. An optional estimated cost appears
 when `turntrail.usagePrices` gives prices per million tokens; Turntrail ships none.

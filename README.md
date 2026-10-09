@@ -164,7 +164,7 @@ JSONL sources are streamed rather than loaded as one string. Discovery, imported
 | `run claude\|codex\|gemini\|cursor [-- <native args>]` | Launch the agent and import the session it changed. |
 | `snapshot` | Capture a git + file-metadata workspace snapshot. |
 | `export --to <target> [options]` | Generate a handoff markdown file. |
-| `usage [--days n] [--by agent\|day\|model\|project\|account] [--prices file] [--json]` | Token use and burn rate across Claude Code and Codex, from local transcripts. |
+| `usage [--days n\|max] [--by agent\|day\|model\|project\|account] [--prices file] [--json]` | Token use and burn rate across Claude Code and Codex, from local transcripts. |
 | `status` | Print ledger counts. |
 | `accounts [--refresh]` | List Codex subscriptions with remaining quota. |
 | `account add <label> [--import]` | Register a subscription; `--import` adopts your current login. |

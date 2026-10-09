@@ -149,6 +149,7 @@ write.
 ```bash
 turntrail usage
 turntrail usage --days 7 --by model
+turntrail usage --days max --by model
 turntrail usage --by day --json
 turntrail usage --prices ./prices.json
 ```
@@ -162,8 +163,9 @@ raw total and far cheaper. Gemini and Cursor transcripts carry no token counts, 
 included.
 
 The default view gives each agent's work for the last hour, today, 7 days and the range, its burn
-rate per hour over the last 24 hours, and its cache reads. `--by day|model|project|account` breaks
-the range down instead. `--prices` takes JSON of US dollars per million tokens by model name or a
+rate per hour over the last 24 hours, and its cache reads. `--days max` covers everything recorded.
+`--by day|model|project|account` breaks the range down instead; `--by model` lists every model
+used in the range. `--prices` takes JSON of US dollars per million tokens by model name or a
 prefix ending in `*` and adds an estimated cost.
 
 Codex is counted per turn, from each turn's own figure or its per-response record. Its running

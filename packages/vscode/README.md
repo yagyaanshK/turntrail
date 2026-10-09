@@ -77,7 +77,8 @@ a machine/editor that fully stopped it, must be resumed again.
 
 A third panel shows token use across Claude Code and Codex, read from the chats they write on this
 machine: each agent's burn rate, today and the last 7, 30 or 90 days, a daily chart, when each
-account's limits will run out at the current pace, and the biggest projects, models and accounts.
+account's limits will run out at the current pace, use by model, and the biggest projects and
+accounts. The range goes up to **Max**, everything recorded.
 Nothing is sent anywhere. The first open reads your history once in the background; after that only
 new lines are read.
 

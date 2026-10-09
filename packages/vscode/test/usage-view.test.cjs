@@ -155,3 +155,61 @@ test('a first scan says what it is doing instead of showing an empty chart', () 
   view.state({ days: 30, loading: true, firstScan: true });
   assert.match(view.root.innerHTML, /for the first time/);
 });
+
+function modelSummary(days, options = {}) {
+  const base = summary(days);
+  const models = [
+    { key: 'codex|gpt-a', label: 'gpt-a', agent: 'codex', rank: 0 },
+    { key: 'claude|opus-b', label: 'opus-b', agent: 'claude', rank: 1 },
+    { key: 'other', label: 'Other models (3)', rank: -1 }
+  ];
+  return {
+    ...base,
+    range: { from: base.daily[0].day, to: base.daily.at(-1).day, max: Boolean(options.max) },
+    byModel: [
+      { key: 'codex|gpt-a', label: 'gpt-a', agent: 'codex', work: 6e6, cacheRead: 1e8 },
+      { key: 'claude|opus-b', label: 'opus-b', agent: 'claude', work: 3e6, cacheRead: 5e7 },
+      { key: 'codex|gpt-c', label: 'gpt-c <old>', agent: 'codex', work: 1e6, cacheRead: 0 }
+    ],
+    modelSeries: {
+      models,
+      daily: base.daily.map((point) => ({ day: point.day, work: { 'codex|gpt-a': 2e6, 'claude|opus-b': 1e6, other: 5e5 }, cacheRead: { 'codex|gpt-a': 0, 'claude|opus-b': 0, other: 0 } }))
+    }
+  };
+}
+
+test('the chart can split by model, with each model\'s colour and an Other series', () => {
+  const view = page();
+  view.state({ days: 7, summary: modelSummary(7), limits: [] });
+  view.click({ '[data-split]': { getAttribute: () => 'model' } });
+  const html = view.root.innerHTML;
+  assert.match(html, /aria-pressed="true">Models</);
+  assert.match(html, /background:var\(--m0\)"><\/i>gpt-a/);
+  assert.match(html, /background:var\(--m1\)"><\/i>opus-b/);
+  assert.match(html, /background:var\(--m-other\)"><\/i>Other models \(3\)/);
+  assert.match(html, /aria-label="Daily work tokens by model"/);
+  // The model table lists every model with its share of the range.
+  assert.match(html, /Models · 7 days/);
+  assert.match(html, /gpt-a<span class="agent-tag">Codex<\/span>/);
+  assert.match(html, />60%</);
+  assert.match(html, /gpt-c &lt;old&gt;/);
+});
+
+test('Max asks the host for everything, and a long range is drawn in weeks', () => {
+  const view = page();
+  view.state({ days: 'max', summary: modelSummary(200, { max: true }), limits: [] });
+  const html = view.root.innerHTML;
+  assert.match(html, /data-range="max" aria-pressed="true" title="Everything recorded">Max</);
+  assert.match(html, /Weekly work · all time/);
+  assert.match(html, /<div class="stat-label">All time<\/div>/);
+  const bars = (html.match(/class="hit/g) || []).length;
+  assert.ok(bars >= 28 && bars <= 30, `200 days fall into about 29 weeks, got ${bars}`);
+  view.click({ '[data-range]': { getAttribute: () => 'max' } });
+  assert.equal(JSON.stringify(view.sent.at(-1)), JSON.stringify({ type: 'range', days: 'max' }));
+});
+
+test('the store accepts Max as a range', () => {
+  const store = new UsageStore(async () => ({}));
+  store.setDays('max');
+  assert.equal(store.days, 'max');
+});

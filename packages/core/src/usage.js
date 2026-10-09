@@ -342,23 +342,42 @@ function projectName(cwd) {
 // accounts over that range. Hours are local.
 export function summarizeUsage(index, options = {}) {
   const now = new Date((options.now || Date.now)());
-  const days = Math.max(1, Math.min(366, Math.floor(options.days || 30)));
   const top = options.top || 8;
   const pad = (n) => String(n).padStart(2, '0');
   const hourOf = (date) => `${dayKey(date)}T${pad(date.getHours())}`;
-  const back = (ms) => new Date(now.getTime() - ms);
+  // Calendar days back from today. Subtracting 24-hour periods instead skips
+  // or repeats a day across a daylight-saving change.
+  const daysBack = (n) => dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n));
   const lastHour = hourOf(now);
-  const since24 = hourOf(back(23 * 3600000));
+  const since24 = hourOf(new Date(now.getTime() - 23 * 3600000));
   const today = dayKey(now);
-  const since7 = dayKey(back(6 * 86400000));
-  const since30 = dayKey(back(29 * 86400000));
-  const rangeStart = dayKey(back((days - 1) * 86400000));
+  const since7 = daysBack(6);
+  const since30 = daysBack(29);
+  // "max" covers everything recorded, from the first day with any usage.
+  const max = options.days === 'max' || options.days === Infinity;
+  let days;
+  if (max) {
+    let first;
+    for (const entry of Object.values(index.files || {})) {
+      for (const key of Object.keys(entry.buckets || {})) {
+        const day = key.slice(0, 10);
+        if (!first || day < first) first = day;
+      }
+    }
+    days = first ? Math.min(MAX_SUMMARY_DAYS, calendarDaysBetween(first, today) + 1) : 1;
+  } else {
+    days = Math.max(1, Math.min(MAX_SUMMARY_DAYS, Math.floor(Number(options.days) || 30)));
+  }
+  const rangeStart = daysBack(days - 1);
 
   const series = new Map();
   for (let i = days - 1; i >= 0; i--) {
-    const day = dayKey(back(i * 86400000));
+    const day = daysBack(i);
     series.set(day, { day, claude: zero(), codex: zero() });
   }
+  // Per model and day, for the chart split by model.
+  const modelDaily = new Map();
+  const modelAllTime = new Map();
   const windows = {};
   const totals = {};
   const earliest = {};
@@ -381,6 +400,8 @@ export function summarizeUsage(index, options = {}) {
       const [hour, model] = key.split('|');
       const day = hour.slice(0, 10);
       accumulate(totals[agent], bucket);
+      const modelKey = `${agent}|${model}`;
+      modelAllTime.set(modelKey, (modelAllTime.get(modelKey) || 0) + bucket[0] + bucket[1] + bucket[3]);
       if (!earliest[agent] || hour < earliest[agent]) earliest[agent] = hour;
       if (hour === lastHour) accumulate(windows[agent].lastHour, bucket);
       if (hour >= since24) accumulate(windows[agent].last24h, bucket);
@@ -390,33 +411,83 @@ export function summarizeUsage(index, options = {}) {
       if (day < rangeStart) continue;
       const point = series.get(day);
       if (point) accumulate(point[agent], bucket);
-      accumulate(group(byModel, `${agent}|${model}`, agent, model), bucket);
+      if (!modelDaily.has(day)) modelDaily.set(day, new Map());
+      const perModel = modelDaily.get(day);
+      const cell = perModel.get(modelKey) || [0, 0];
+      cell[0] += bucket[0] + bucket[1] + bucket[3];
+      cell[1] += bucket[2];
+      perModel.set(modelKey, cell);
+      accumulate(group(byModel, modelKey, agent, model), bucket);
       accumulate(group(byProject, `${agent}|${entry.cwd || ''}`, agent, projectName(entry.cwd)), bucket);
       const accountLabel = entry.account === 'default' ? 'Default sign-in' : index.labels?.[entry.account] || entry.account;
       accumulate(group(byAccount, `${agent}|${entry.account}`, agent, accountLabel), bucket);
     }
   }
 
-  const ranked = (map) => [...map.values()]
+  const ranked = (map, limit = top) => [...map.values()]
     .filter((row) => row.work > 0 || row.cacheRead > 0)
     .sort((a, b) => b.work - a.work || b.cacheRead - a.cacheRead)
-    .slice(0, top);
+    .slice(0, limit);
+  const models = ranked(byModel, options.modelTop || 50);
   return {
     generatedAt: now.toISOString(),
     scannedAt: index.scannedAt,
     days,
-    range: { from: rangeStart, to: today },
+    range: { from: rangeStart, to: today, max },
     totals,
     earliest: Object.fromEntries(Object.entries(earliest).map(([agent, hour]) => [agent, hour.slice(0, 10)])),
     windows,
     // Per-hour work over the last 24 hours, the burn rate.
     burnPerHour: Object.fromEntries(USAGE_AGENTS.map((agent) => [agent, Math.round(windows[agent].last24h.work / 24)])),
     daily: [...series.values()],
-    byModel: ranked(byModel),
+    byModel: models,
+    modelSeries: modelSeries(models, modelAllTime, modelDaily, [...series.keys()]),
     byProject: ranked(byProject),
     byAccount: ranked(byAccount),
     files: Object.keys(index.files || {}).length
   };
+}
+
+// The daily series split by model: the biggest models in the range each get a
+// series and the rest fold into "Other", so the chart never needs more colours
+// than it can tell apart. Each model carries its all-time rank, which the view
+// uses to give it the same colour whatever range is shown.
+// Four: the most colours the reference palette can keep apart in every pairing,
+// light and dark, once the two agent colours are set aside.
+const MODEL_SERIES = 4;
+const MAX_SUMMARY_DAYS = 3660;
+
+function modelSeries(rankedModels, allTime, modelDaily, days) {
+  const allTimeOrder = [...allTime.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key);
+  const shown = rankedModels.slice(0, MODEL_SERIES);
+  const shownKeys = new Set(shown.map((row) => row.key));
+  const models = shown.map((row) => ({ key: row.key, label: row.label, agent: row.agent, rank: allTimeOrder.indexOf(row.key) }));
+  const hasOther = rankedModels.length > MODEL_SERIES;
+  if (hasOther) models.push({ key: 'other', label: `Other models (${rankedModels.length - MODEL_SERIES})`, rank: -1 });
+  const daily = days.map((day) => {
+    const work = {};
+    const cacheRead = {};
+    for (const model of models) {
+      work[model.key] = 0;
+      cacheRead[model.key] = 0;
+    }
+    for (const [key, cell] of modelDaily.get(day) || []) {
+      const target = shownKeys.has(key) ? key : hasOther ? 'other' : undefined;
+      if (!target) continue;
+      work[target] += cell[0];
+      cacheRead[target] += cell[1];
+    }
+    return { day, work, cacheRead };
+  });
+  return { models, daily };
+}
+
+function calendarDaysBetween(from, to) {
+  const parse = (day) => {
+    const [y, m, d] = day.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  return Math.round((parse(to) - parse(from)) / 86400000);
 }
 
 // ---------------------------------------------------------------------------

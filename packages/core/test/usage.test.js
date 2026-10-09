@@ -214,3 +214,48 @@ test('a limit is projected from the pace of the window so far', () => {
   assert.equal(projectLimitWindow({ usedPercent: 100, windowSeconds: week, resetsAt: resetIn(5) }, now).exhausted, true);
   assert.equal(projectLimitWindow({ usedPercent: 10 }, now), undefined);
 });
+
+test('the max range runs from the first day with usage, and models fold into Other past four', async () => {
+  const { claude, options } = await sandbox();
+  const models = ['m-a', 'm-b', 'm-c', 'm-d', 'm-e', 'm-f', 'm-g'];
+  const lines = [];
+  // Seven models over 400 days: m-a used most, m-g least; one old reply 400 days back.
+  models.forEach((model, i) => {
+    lines.push(claudeReply(`r-${model}`, at(24 * (i + 1)), { input_tokens: (models.length - i) * 1000, output_tokens: 0 }, model));
+  });
+  lines.push(claudeReply('ancient', at(24 * 400), { input_tokens: 5, output_tokens: 0 }, 'm-a'));
+  await fs.writeFile(path.join(claude, 'models.jsonl'), jsonl(lines));
+  const index = await scanUsage(options);
+
+  const max = summarizeUsage(index, { now: options.now, days: 'max' });
+  assert.equal(max.range.max, true);
+  assert.equal(max.days, 401);
+  assert.equal(max.daily.length, 401);
+  assert.equal(max.daily[0].claude.work, 5, 'the first day is the oldest reply');
+  assert.equal(max.byModel.length, 7, 'every model is listed, not just the top few');
+
+  const series = max.modelSeries;
+  assert.deepEqual(series.models.map((m) => m.label), ['m-a', 'm-b', 'm-c', 'm-d', 'Other models (3)']);
+  assert.deepEqual(series.models.map((m) => m.rank), [0, 1, 2, 3, -1]);
+  const sum = (daily) => daily.reduce((total, day) => total + Object.values(day.work).reduce((a, b) => a + b, 0), 0);
+  assert.equal(sum(series.daily), max.totals.claude.work, 'the model series adds up to the agent total');
+  const other = series.daily.reduce((total, day) => total + day.work.other, 0);
+  assert.equal(other, 3000 + 2000 + 1000, 'm-e, m-f and m-g are in Other');
+
+  // In a short range a model keeps its all-time rank, so its colour does not move.
+  const week = summarizeUsage(index, { now: options.now, days: 7 });
+  assert.equal(week.range.max, false);
+  assert.equal(week.modelSeries.models.find((m) => m.label === 'm-b').rank, 1);
+});
+
+test('day lists follow the calendar, not 24-hour steps', async () => {
+  const { claude, options } = await sandbox();
+  await fs.writeFile(path.join(claude, 'one.jsonl'), jsonl([claudeReply('x', at(1), { input_tokens: 1 })]));
+  const summary = summarizeUsage(await scanUsage(options), { now: options.now, days: 90 });
+  const days = summary.daily.map((point) => point.day);
+  assert.equal(new Set(days).size, 90, 'no day repeated');
+  for (let i = 1; i < days.length; i++) {
+    const [a, b] = [days[i - 1], days[i]].map((day) => new Date(`${day}T12:00:00`));
+    assert.equal(Math.round((b - a) / 86400000), 1, `${days[i - 1]} is followed by the next day`);
+  }
+});

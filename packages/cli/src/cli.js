@@ -47,7 +47,7 @@ Usage:
   turntrail account use <id>
   turntrail account remove <id> [--purge]
   turntrail account maintain [--json]
-  turntrail usage [--days <n>] [--by agent|day|model|project|account] [--prices <file>] [--json]
+  turntrail usage [--days <n>|max] [--by agent|day|model|project|account] [--prices <file>] [--json]
 
 Account options:
   --import                Adopt the login already in the default CODEX_HOME
@@ -60,7 +60,8 @@ Account options:
   --json                  Emit machine-readable maintenance results.
 
 Usage options:
-  --days <n>              How many days to cover (default 30).
+  --days <n>|max          How many days to cover (default 30); max covers
+                          everything recorded.
   --by <view>             agent (default), day, model, project or account.
   --prices <file>         JSON of US dollars per million tokens by model name or
                           prefix ending in *, e.g. {"claude-opus-5*": {"input": 5,
@@ -210,8 +211,8 @@ export async function runCli(argv, io = process, dependencies = {}) {
   }
 
   if (command === 'usage') {
-    const days = flags.days !== undefined ? Number(flags.days) : 30;
-    if (!Number.isFinite(days) || days < 1) throw new Error('--days must be a positive number.');
+    const days = flags.days === 'max' ? 'max' : flags.days !== undefined ? Number(flags.days) : 30;
+    if (days !== 'max' && (!Number.isFinite(days) || days < 1)) throw new Error('--days must be a positive number or max.');
     const index = await scanUsage();
     const summary = summarizeUsage(index, { days, top: 20 });
     let cost;
@@ -566,7 +567,8 @@ function formatTokens(value) {
 const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex' };
 
 export function renderUsage(summary, by = 'agent', cost) {
-  const lines = [`Token use, last ${summary.days} days (${summary.range.from} to ${summary.range.to})`, ''];
+  const span = summary.range.max ? `all time, ${summary.days} days` : `last ${summary.days} days`;
+  const lines = [`Token use, ${span} (${summary.range.from} to ${summary.range.to})`, ''];
   const table = (header, rows) => {
     const widths = header.map((cell, i) => Math.max(cell.length, ...rows.map((row) => String(row[i]).length)));
     const line = (row) => row.map((cell, i) => (i === 0 ? String(cell).padEnd(widths[i]) : String(cell).padStart(widths[i]))).join('  ');
@@ -582,7 +584,7 @@ export function renderUsage(summary, by = 'agent', cost) {
       row.label, AGENT_NAMES[row.agent] || row.agent, formatTokens(row.work), formatTokens(row.cacheRead), row.calls
     ]));
   } else {
-    table(['Agent', 'Last hour', 'Today', '7 days', `${summary.days} days`, 'Per hour (24h)', 'Cache reads'], ['claude', 'codex'].map((agent) => {
+    table(['Agent', 'Last hour', 'Today', '7 days', summary.range.max ? 'All time' : `${summary.days} days`, 'Per hour (24h)', 'Cache reads'], ['claude', 'codex'].map((agent) => {
       const w = summary.windows[agent];
       const range = summary.daily.reduce((sum, point) => sum + point[agent].work, 0);
       const cache = summary.daily.reduce((sum, point) => sum + point[agent].cacheRead, 0);
