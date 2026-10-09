@@ -215,3 +215,14 @@ export {
   CLAUDE_PROFILE_URL,
   CLAUDE_TOKEN_URL
 } from './accounts/claude-oauth.js';
+export {
+  estimateUsageCost,
+  projectLimitWindow,
+  readUsageIndex,
+  scanUsage,
+  summarizeUsage,
+  usageIndexPath,
+  usageLocations,
+  DEFAULT_USAGE_DAYS,
+  USAGE_AGENTS
+} from './usage.js';

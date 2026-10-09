@@ -164,6 +164,7 @@ JSONL sources are streamed rather than loaded as one string. Discovery, imported
 | `run claude\|codex\|gemini\|cursor [-- <native args>]` | Launch the agent and import the session it changed. |
 | `snapshot` | Capture a git + file-metadata workspace snapshot. |
 | `export --to <target> [options]` | Generate a handoff markdown file. |
+| `usage [--days n] [--by agent\|day\|model\|project\|account] [--prices file] [--json]` | Token use and burn rate across Claude Code and Codex, from local transcripts. |
 | `status` | Print ledger counts. |
 | `accounts [--refresh]` | List Codex subscriptions with remaining quota. |
 | `account add <label> [--import]` | Register a subscription; `--import` adopts your current login. |
@@ -248,8 +249,24 @@ normalized local ledger; native transcript paths are not sent into the webview.
 | `codexOpenCommand` | `""` | Exact command id to open Codex. Empty means auto-detect. |
 | `accountMaintenance.enabled` | `false` | Opt into background OAuth maintenance and quota reads while the editor is open. |
 | `accountMaintenance.intervalHours` | `5` | Hours between background runs, with timing jitter (1-24). |
+| `usagePrices` | `{}` | Optional US dollars per million tokens by model or prefix ending in `*`, for an estimated cost in Usage Statistics. Turntrail ships no prices. |
 
 ---
+
+## Usage statistics
+
+Turntrail reads the token counts Claude Code and Codex record in their chats on this machine:
+every model reply carries the provider's own usage figures. Nothing is sent anywhere. Counts are
+kept in four parts, because they cost and count against limits differently: new input, cache
+writes, cache reads, and output. **Work** is new input + cache writes + output, what each turn
+added; **cache reads** are the conversation re-read from the prompt cache every turn, most of the
+raw total and far cheaper. Gemini and Cursor transcripts carry no token counts, so they are not
+included.
+
+The **Usage Statistics** panel shows each agent's burn rate and daily use, projects every
+account's quota windows at the current pace, and ranks projects, models and accounts;
+`turntrail usage` prints the same figures. See [VS Code](docs/VS_CODE.md#the-usage-statistics-panel)
+and [CLI](docs/CLI.md#usage).
 
 ## Multiple accounts
 

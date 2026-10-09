@@ -73,6 +73,14 @@ Editor terminal reconnection may preserve a live managed process across window r
 Turntrail reattaches through a validated marker. This is not a daemon: a process that has exited, or
 a machine/editor that fully stopped it, must be resumed again.
 
+## Usage Statistics
+
+A third panel shows token use across Claude Code and Codex, read from the chats they write on this
+machine: each agent's burn rate, today and the last 7, 30 or 90 days, a daily chart, when each
+account's limits will run out at the current pace, and the biggest projects, models and accounts.
+Nothing is sent anywhere. The first open reads your history once in the background; after that only
+new lines are read.
+
 ## Commands
 
 **Handoff**

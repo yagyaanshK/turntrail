@@ -83,6 +83,28 @@ the reports.
 Gemini and Cursor are currently source providers. Their sessions can be imported, viewed, and handed
 off to Claude or Codex, but Turntrail does not yet open or inject prompts into Gemini or Cursor.
 
+## The Usage Statistics Panel
+
+Turntrail reads the token counts Claude Code and Codex record in their chats on this machine:
+every model reply carries the provider's own usage figures. Nothing is sent anywhere. Counts are
+kept in four parts, because they cost and count against limits differently: new input, cache
+writes, cache reads, and output. **Work** is new input + cache writes + output, what each turn
+added; **cache reads** are the conversation re-read from the prompt cache every turn, most of the
+raw total and far cheaper. Gemini and Cursor transcripts carry no token counts, so they are not
+included.
+
+The panel shows, per agent, today's work, the burn rate (work per hour over the last 24 hours) and
+the selected range; a daily stacked chart of both agents for 7, 30 or 90 days, as work or as cache
+reads, with a per-day tooltip and a table view; **Limits at this pace**, which projects each
+account's quota windows from how fast each has been used so far and warns when one will run out
+before it resets; and the biggest projects, models and accounts. An optional estimated cost appears
+when `turntrail.usagePrices` gives prices per million tokens; Turntrail ships none.
+
+The first open reads every transcript once, in a background worker so the rest of Turntrail stays
+responsive; a long history takes about a minute. An index of hourly totals is kept in
+`~/.turntrail/usage/`, so later reads cover only lines appended since, and while the panel is open
+it updates a few seconds after an agent writes.
+
 ### Status Bar
 
 The status bar shows the account in use and its remaining quota for the agent you are working

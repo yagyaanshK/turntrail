@@ -41,6 +41,7 @@ const src = fileURLToPath(new URL('../packages/vscode/src/', import.meta.url));
 const { AccountsStore, AccountsWebview } = require(src + 'accounts-view.cjs');
 const { SessionsStore, SessionsWebview } = require(src + 'sessions-view.cjs');
 const { LoginPanel } = require(src + 'login-view.cjs');
+const { UsageStore, UsageWebview } = require(src + 'usage-view.cjs');
 
 function capture(assign) {
   let html;
@@ -65,6 +66,11 @@ const pages = {
     const store = new AccountsStore(async () => ({}));
     store.viewModel = async () => ({ sections: [] });
     new AccountsWebview(store).resolveWebviewView({ webview, onDidChangeVisibility() {}, visible: false });
+  }),
+  usage: capture((webview) => {
+    const store = new UsageStore(async () => ({}));
+    store.refresh = async () => {};
+    new UsageWebview(store).resolveWebviewView({ webview, onDidChangeVisibility() {}, visible: false });
   }),
   sessions: capture((webview) => {
     const store = new SessionsStore(async () => ({}), async () => '/workspace');

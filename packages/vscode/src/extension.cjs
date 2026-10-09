@@ -11,6 +11,8 @@ const { handoffForRoot } = require('./handoff-state.cjs');
 const { LoginPanel } = require('./login-view.cjs');
 const { runWithCancellation } = require('./progress.cjs');
 const { AgentActivity } = require('./agent-activity.cjs');
+const { UsageStore, UsageWebview, projectLimits, workerPath: usageWorkerPath } = require('./usage-view.cjs');
+const { Worker } = require('node:worker_threads');
 const { chooseStatusProvider, terminalProvider } = require('./status-choice.cjs');
 const {
   consumeSwitchResults,
@@ -30,6 +32,9 @@ let accountMaintenance;
 let accountMaintenanceOutput;
 let accountMaintenanceOffer;
 let agentActivity;
+let usageStore;
+let usageWebview;
+let usageTimer;
 let statusShown;
 let statusTimer;
 
@@ -45,6 +50,18 @@ async function activateExtension(context) {
   sessionsProvider = new SessionsStore(core, workspaceRoot, { discoveryOptions: accountSessionDiscoveryOptions });
   sessionsWebview = new SessionsWebview(sessionsProvider);
   loginPanel = new LoginPanel(context, core, accountsProvider);
+  usageStore = new UsageStore(core, {
+    runScan: runUsageScan,
+    getPrices: () => {
+      const prices = setting('usagePrices');
+      return prices && typeof prices === 'object' && !Array.isArray(prices) ? prices : undefined;
+    },
+    getLimits: async () => {
+      const api = await core();
+      return projectLimits(await accountsProvider.accounts(), accountsProvider.usage, api.projectLimitWindow);
+    }
+  });
+  usageWebview = new UsageWebview(usageStore);
 
   // The panel is only visible when its view is open, so the account in use also
   // lives in the status bar - that is where you look while actually working.
@@ -54,9 +71,13 @@ async function activateExtension(context) {
   // The bar shows the limits of the agent in use here, so it listens for signs
   // of use as well as for account changes.
   agentActivity = new AgentActivity({ isWorkspaceTranscript });
-  agentActivity.onDidChange(() => scheduleStatus());
+  agentActivity.onDidChange(() => {
+    scheduleStatus();
+    scheduleUsageRefresh();
+  });
   accountsProvider.onDidChange(() => {
     scheduleStatus();
+    usageWebview?.update();
     watchAgentFolders().catch(() => {});
   });
   accountMaintenanceOutput = vscode.window.createOutputChannel('Turntrail Accounts');
@@ -77,6 +98,9 @@ async function activateExtension(context) {
     accountsProvider.onDidChange(() => queueAccountMaintenanceOffer(context)),
     vscode.window.registerWebviewViewProvider('turntrailAccounts', accountsWebview),
     vscode.window.registerWebviewViewProvider('turntrailSessions', sessionsWebview),
+    vscode.window.registerWebviewViewProvider('turntrailUsage', usageWebview),
+    usageStore.emitter,
+    { dispose: () => clearTimeout(usageTimer) },
     ...compatibleCommands('switchAccount', (item) => switchAccount(item)),
     ...compatibleCommands('showRawUsage', (item) => showRawUsage(item)),
     ...compatibleCommands('undoAccountSwitch', () => undoAccountSwitch()),
@@ -94,6 +118,7 @@ async function activateExtension(context) {
     ...compatibleCommands('forgetAccount', (item) => forgetAccount(item)),
     ...compatibleCommands('toggleAccountMaintenance', () => toggleAccountMaintenance()),
     ...compatibleCommands('runAccountMaintenance', () => runAccountMaintenance()),
+    ...compatibleCommands('refreshUsage', () => usageStore.refresh()),
     ...compatibleCommands('keepClaudeChats', (item) => keepClaudeChats(item)),
     ...compatibleCommands('discoverClaude', () => discover('claude')),
     ...compatibleCommands('discoverCodex', () => discover('codex')),
@@ -435,6 +460,51 @@ async function showRawUsage(item) {
 // Claude spark and the OpenAI mark, so the number reads as one agent's at a
 // glance. Codex is OpenAI's agent.
 const STATUS_ICONS = { claude: '$(turntrail-claude)', codex: '$(turntrail-openai)' };
+
+// While the Usage view is open, a write to a transcript brings it up to date:
+// the scan reads only what was appended, so this stays cheap.
+function scheduleUsageRefresh() {
+  if (!usageWebview?.view?.visible) return;
+  clearTimeout(usageTimer);
+  usageTimer = setTimeout(() => usageStore.refresh(), 5000);
+}
+
+// The scan runs in a worker so a first read of a long history does not hold
+// up the extension host. Should a worker not start, the host scans itself.
+function runUsageScan() {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let worker;
+    const fallback = async (error) => {
+      if (settled) return;
+      settled = true;
+      try {
+        const api = await core();
+        await api.scanUsage();
+        resolve();
+      } catch (scanError) {
+        reject(scanError || error);
+      }
+    };
+    try {
+      worker = new Worker(usageWorkerPath, { workerData: {} });
+    } catch (error) {
+      fallback(error);
+      return;
+    }
+    worker.once('message', (message) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate().catch(() => {});
+      if (message?.ok) resolve(message);
+      else reject(new Error(message?.error || 'The usage scan failed.'));
+    });
+    worker.once('error', (error) => fallback(error));
+    worker.once('exit', (code) => {
+      if (!settled) fallback(new Error(`The usage scan stopped (exit ${code}).`));
+    });
+  });
+}
 
 // Coalesces bursts: a transcript is written several times per message.
 function scheduleStatus() {

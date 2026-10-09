@@ -455,6 +455,26 @@ when no provider process is running; a live owner causes the repair to be deferr
 The VS Code scheduler is application-scoped, disabled by default, and jittered around a five-hour
 interval; `turntrail account maintain` exposes the same operation to OS schedulers.
 
+## Usage
+
+`packages/core/src/usage.js` reads token counts from the Claude and Codex transcript folders, the
+default homes and each managed account's. `scanUsage` keeps an index under
+`~/.turntrail/usage/usage-index.json` with, per transcript, its size, mtime, the byte offset read
+to, a little parser state, and hourly buckets keyed by local hour and model. A later scan reads
+only complete lines appended past the offset (a line still being written is left for next time),
+reads a rewritten or shrunk file from the start, and forgets deleted ones. A change of timezone
+rebuilds the index, since hours are local. Lines over 8 MiB are passed over without being held.
+
+Claude usage is deduplicated by request id, because one reply is written as several lines. Codex
+is counted per turn: `last_token_usage` on `token_count` events whose running total changed, or
+`token_usage_record` once a thread has them. The running total itself is never summed, because a
+forked or resumed thread inherits its parent's. When a thread starts writing records part-way,
+the turn figure written just before the first record is the same turn and is taken back out.
+
+`summarizeUsage` turns the index into per-agent windows (last hour, 24 hours, today, 7 and 30
+days), a burn rate, a daily series and rankings. `projectLimitWindow` projects a quota window from
+its used share and elapsed share. `estimateUsageCost` prices only models the caller supplies.
+
 ## Privacy Model
 
 `.turntrail/` is gitignored because it may contain:

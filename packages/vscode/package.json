@@ -41,6 +41,7 @@
     "onStartupFinished",
     "onView:turntrailAccounts",
     "onView:turntrailSessions",
+    "onView:turntrailUsage",
     "onCommand:turntrail.refreshSessions",
     "onCommand:turntrail.importIndexedSession",
     "onCommand:turntrail.viewIndexedSession",
@@ -81,6 +82,7 @@
     "onCommand:turntrail.toggleAccountMaintenance",
     "onCommand:turntrail.runAccountMaintenance",
     "onCommand:turntrail.keepClaudeChats",
+    "onCommand:turntrail.refreshUsage",
     "onCommand:contextBridge.switchAccount",
     "onCommand:contextBridge.refreshAccountQuota",
     "onCommand:contextBridge.useCodexReset",
@@ -120,7 +122,8 @@
     "onCommand:contextBridge.closeManagedSession",
     "onCommand:contextBridge.toggleAccountMaintenance",
     "onCommand:contextBridge.runAccountMaintenance",
-    "onCommand:contextBridge.keepClaudeChats"
+    "onCommand:contextBridge.keepClaudeChats",
+    "onCommand:contextBridge.refreshUsage"
   ],
   "main": "./src/extension.cjs",
   "contributes": {
@@ -144,6 +147,12 @@
         {
           "id": "turntrailAccounts",
           "name": "Accounts",
+          "contextualTitle": "Turntrail",
+          "type": "webview"
+        },
+        {
+          "id": "turntrailUsage",
+          "name": "Usage Statistics",
           "contextualTitle": "Turntrail",
           "type": "webview"
         }
@@ -322,6 +331,11 @@
       {
         "command": "turntrail.closeManagedSession",
         "title": "Turntrail: Close Managed CLI Session"
+      },
+      {
+        "command": "turntrail.refreshUsage",
+        "title": "Turntrail: Refresh Usage Statistics",
+        "icon": "$(refresh)"
       }
     ],
     "icons": {
@@ -496,6 +510,11 @@
         "contextBridge.alwaysUseLatestSession": {
           "type": "boolean",
           "deprecationMessage": "Renamed to turntrail.alwaysUseLatestSession. Existing values remain supported."
+        },
+        "turntrail.usagePrices": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Optional prices for an estimated cost in **Usage Statistics**, in US dollars per million tokens, keyed by model name or a prefix ending in `*`. For example `{\"claude-opus-5*\": {\"input\": 5, \"cacheWrite\": 6.25, \"cacheRead\": 0.5, \"output\": 25}}`. Turntrail ships no prices: they change, and a subscription is not billed per token. Models without a price are listed as unpriced."
         }
       }
     },
@@ -519,6 +538,11 @@
         {
           "command": "turntrail.refreshSessions",
           "when": "view == turntrailSessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "turntrail.refreshUsage",
+          "when": "view == turntrailUsage",
           "group": "navigation@1"
         }
       ],

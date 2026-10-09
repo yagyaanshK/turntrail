@@ -1,0 +1,216 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { estimateUsageCost, projectLimitWindow, readUsageIndex, scanUsage, summarizeUsage } from '../src/index.js';
+
+delete process.env.CLAUDE_CONFIG_DIR;
+delete process.env.CODEX_HOME;
+
+// Local noon on a fixed day, so hour buckets and "today" are predictable in
+// any timezone the tests run in.
+const NOON = new Date(2026, 9, 9, 12, 0, 0);
+const at = (hoursBefore, minutes = 0) => new Date(NOON.getTime() - hoursBefore * 3600000 + minutes * 60000).toISOString();
+
+async function sandbox() {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-usage-'));
+  const claude = path.join(home, '.claude', 'projects', 'd--work');
+  const codex = path.join(home, '.codex', 'sessions', '2026', '10', '09');
+  await fs.mkdir(claude, { recursive: true });
+  await fs.mkdir(codex, { recursive: true });
+  const options = { home, accountsRoot: path.join(home, '.turntrail'), usageIndexPath: path.join(home, 'usage-index.json'), now: () => NOON.getTime() };
+  return { home, claude, codex, options };
+}
+
+const jsonl = (records) => records.map((record) => JSON.stringify(record)).join('\n') + '\n';
+
+function claudeReply(id, when, usage, model = 'claude-opus-5-5') {
+  return { type: 'assistant', requestId: id, timestamp: when, cwd: 'D:\\work', message: { id: `msg-${id}`, role: 'assistant', model, usage } };
+}
+
+test('a Claude reply written as several lines is counted once', async () => {
+  const { claude, options } = await sandbox();
+  const usage = { input_tokens: 10, cache_creation_input_tokens: 1000, cache_read_input_tokens: 50000, output_tokens: 300 };
+  await fs.writeFile(path.join(claude, 'a.jsonl'), jsonl([
+    { type: 'user', timestamp: at(1), cwd: 'D:\\work', message: { role: 'user', content: 'go' } },
+    claudeReply('r1', at(1, 1), usage),
+    claudeReply('r1', at(1, 1), usage),
+    claudeReply('r1', at(1, 1), usage),
+    claudeReply('r2', at(0), { input_tokens: 5, cache_read_input_tokens: 51000, output_tokens: 100 }),
+    { ...claudeReply('r3', at(0), { output_tokens: 999 }), message: { model: '<synthetic>', usage: { output_tokens: 999 } } }
+  ]));
+
+  const summary = summarizeUsage(await scanUsage(options), { now: options.now, days: 7 });
+  const total = summary.totals.claude;
+  assert.equal(total.calls, 2);
+  assert.equal(total.fresh, 15);
+  assert.equal(total.cacheWrite, 1000);
+  assert.equal(total.cacheRead, 101000);
+  assert.equal(total.output, 400);
+  assert.equal(total.work, 15 + 1000 + 400);
+  assert.equal(summary.byProject[0].label, 'work');
+  assert.equal(summary.byModel[0].label, 'claude-opus-5-5');
+});
+
+function codexMeta(cwd = 'D:\\work') {
+  return { timestamp: at(3), type: 'session_meta', payload: { id: 't', cwd } };
+}
+function tokenCount(when, total, last) {
+  return { timestamp: when, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: total, last_token_usage: last } } };
+}
+const u = (input, cached, output) => ({ input_tokens: input, cached_input_tokens: cached, output_tokens: output, total_tokens: input + output });
+
+test('a forked Codex thread does not count the total it inherited from its parent', async () => {
+  const { codex, options } = await sandbox();
+  // The fork starts with its parent's 40 million already in the running total.
+  await fs.writeFile(path.join(codex, 'rollout-fork.jsonl'), jsonl([
+    codexMeta(),
+    { timestamp: at(2), type: 'turn_context', payload: { model: 'gpt-6.1-sol', cwd: 'D:\\work' } },
+    tokenCount(at(2), u(40_001_000, 30_000_000, 2_000), u(1_000, 400, 50)),
+    tokenCount(at(2), u(40_001_000, 30_000_000, 2_000), u(1_000, 400, 50)),
+    tokenCount(at(1), u(40_003_000, 30_001_000, 2_100), u(2_000, 600, 100))
+  ]));
+  const total = summarizeUsage(await scanUsage(options), { now: options.now }).totals.codex;
+  assert.equal(total.calls, 2, 'the repeated event is the same turn');
+  assert.equal(total.fresh, (1_000 - 400) + (2_000 - 600));
+  assert.equal(total.cacheRead, 400 + 600);
+  assert.equal(total.output, 150);
+});
+
+test('Codex per-response records take over from turn figures without losing the turns before them', async () => {
+  const { codex, options } = await sandbox();
+  await fs.writeFile(path.join(codex, 'rollout-upgraded.jsonl'), jsonl([
+    codexMeta(),
+    { timestamp: at(3), type: 'turn_context', payload: { model: 'gpt-5.5' } },
+    // Before the client wrote records: counted from the turn figure.
+    tokenCount(at(3), u(1_000, 0, 10), u(1_000, 0, 10)),
+    { timestamp: at(2), type: 'turn_context', payload: { model: 'gpt-6.1-sol' } },
+    // Once records appear they are the count, and turn figures are ignored.
+    tokenCount(at(2), u(3_000, 500, 30), u(2_000, 500, 20)),
+    { timestamp: at(2), type: 'token_usage_record', payload: { response_id: 'resp-1', usage: u(2_000, 500, 20) } },
+    tokenCount(at(1), u(6_000, 900, 60), u(3_000, 400, 30)),
+    { timestamp: at(1), type: 'token_usage_record', payload: { response_id: 'resp-2', usage: u(3_000, 400, 30) } }
+  ]));
+  const summary = summarizeUsage(await scanUsage(options), { now: options.now });
+  const total = summary.totals.codex;
+  // The turn before records, then the two records. The turn figure written
+  // just ahead of the first record is the same turn and is not counted again.
+  assert.equal(total.output, 10 + 20 + 30);
+  assert.equal(total.calls, 3);
+  const models = Object.fromEntries(summary.byModel.map((row) => [row.label, row.output]));
+  assert.equal(models['gpt-5.5'], 10);
+});
+
+test('a later pass reads only what was appended, and leaves a half-written line for next time', async () => {
+  const { claude, options } = await sandbox();
+  const file = path.join(claude, 'live.jsonl');
+  await fs.writeFile(file, jsonl([claudeReply('a', at(2), { input_tokens: 1, output_tokens: 10 })]));
+  let index = await scanUsage(options);
+  const first = Object.values(index.files)[0].offset;
+  assert.equal(index.lastScan.read, 1);
+
+  // Nothing changed: nothing is read.
+  index = await scanUsage({ ...options, index });
+  assert.equal(index.lastScan.read, 0);
+
+  // A complete reply and half of the next one.
+  const next = JSON.stringify(claudeReply('b', at(1), { input_tokens: 2, output_tokens: 20 }));
+  const partial = JSON.stringify(claudeReply('c', at(0), { input_tokens: 3, output_tokens: 30 }));
+  await fs.appendFile(file, `${next}\n${partial.slice(0, 40)}`);
+  index = await scanUsage({ ...options, index });
+  assert.equal(index.lastScan.bytes, Buffer.byteLength(next) + 1, 'only the complete appended line was read');
+  assert.equal(Object.values(index.files)[0].offset, first + Buffer.byteLength(next) + 1);
+  assert.equal(summarizeUsage(index, { now: options.now }).totals.claude.output, 30);
+
+  await fs.appendFile(file, `${partial.slice(40)}\n`);
+  index = await scanUsage({ ...options, index });
+  assert.equal(summarizeUsage(index, { now: options.now }).totals.claude.output, 60);
+
+  // The saved index is the same as the one in memory.
+  const saved = await readUsageIndex(options);
+  assert.equal(summarizeUsage(saved, { now: options.now }).totals.claude.output, 60);
+});
+
+test('a rewritten file is read again from the start, and a deleted one is forgotten', async () => {
+  const { claude, options } = await sandbox();
+  const file = path.join(claude, 'x.jsonl');
+  await fs.writeFile(file, jsonl([claudeReply('a', at(1), { output_tokens: 500 }), claudeReply('b', at(1), { output_tokens: 500 })]));
+  let index = await scanUsage(options);
+  await fs.writeFile(file, jsonl([claudeReply('z', at(1), { output_tokens: 7 })]));
+  index = await scanUsage({ ...options, index });
+  assert.equal(summarizeUsage(index, { now: options.now }).totals.claude.output, 7);
+  await fs.rm(file);
+  index = await scanUsage({ ...options, index });
+  assert.equal(Object.keys(index.files).length, 0);
+});
+
+test('a record too long to hold is passed over without breaking the lines after it', async () => {
+  const { codex, options } = await sandbox();
+  const huge = JSON.stringify({ timestamp: at(2), type: 'compacted', payload: { replacement_history: 'x'.repeat(9 * 1024 * 1024) } });
+  await fs.writeFile(path.join(codex, 'rollout-big.jsonl'), [
+    JSON.stringify(codexMeta()),
+    huge,
+    JSON.stringify(tokenCount(at(1), u(100, 0, 5), u(100, 0, 5)))
+  ].join('\n') + '\n');
+  const total = summarizeUsage(await scanUsage(options), { now: options.now }).totals.codex;
+  assert.equal(total.output, 5);
+});
+
+test('summaries split usage into the windows a burn rate needs', async () => {
+  const { claude, options } = await sandbox();
+  await fs.writeFile(path.join(claude, 'w.jsonl'), jsonl([
+    claudeReply('now', at(0, 10), { input_tokens: 100, output_tokens: 0 }),
+    claudeReply('2h', at(2), { input_tokens: 200, output_tokens: 0 }),
+    claudeReply('3d', at(72), { input_tokens: 400, output_tokens: 0 }),
+    claudeReply('20d', at(480), { input_tokens: 800, output_tokens: 0 }),
+    claudeReply('60d', at(1440), { input_tokens: 1600, output_tokens: 0 })
+  ]));
+  const summary = summarizeUsage(await scanUsage(options), { now: options.now, days: 30 });
+  const w = summary.windows.claude;
+  assert.equal(w.lastHour.work, 100);
+  assert.equal(w.last24h.work, 300);
+  assert.equal(w.today.work, 300);
+  assert.equal(w.last7.work, 700);
+  assert.equal(w.last30.work, 1500);
+  assert.equal(summary.totals.claude.work, 3100);
+  assert.equal(summary.burnPerHour.claude, Math.round(300 / 24));
+  assert.equal(summary.daily.length, 30);
+  assert.equal(summary.daily.at(-1).claude.work, 300);
+  assert.equal(summary.daily.reduce((sum, point) => sum + point.claude.work, 0), 1500);
+});
+
+test('cost is estimated only for models the user priced', () => {
+  const rows = [
+    { label: 'claude-opus-5-5', fresh: 1e6, cacheWrite: 1e6, cacheRead: 10e6, output: 1e6 },
+    { label: 'gpt-6.1-sol', fresh: 1e6, cacheWrite: 0, cacheRead: 0, output: 1e6 }
+  ];
+  const prices = { 'claude-opus-5*': { input: 5, cacheWrite: 6.25, cacheRead: 0.5, output: 25 } };
+  const cost = estimateUsageCost(rows, prices);
+  assert.equal(cost.total, 5 + 6.25 + 5 + 25);
+  assert.equal(cost.priced, 1);
+  assert.deepEqual(cost.unpriced, ['gpt-6.1-sol']);
+  // An exact name beats a prefix.
+  assert.equal(estimateUsageCost([rows[0]], { ...prices, 'claude-opus-5-5': { input: 1, cacheRead: 0, output: 0 } }).total, 1 + 1);
+  assert.deepEqual(estimateUsageCost(rows, {}), { total: 0, priced: 0, unpriced: ['claude-opus-5-5', 'gpt-6.1-sol'] });
+});
+
+test('a limit is projected from the pace of the window so far', () => {
+  const now = Date.parse('2026-10-09T12:00:00Z');
+  const week = 7 * 24 * 3600;
+  const resetIn = (hours) => new Date(now + hours * 3600000).toISOString();
+  // Two days into a week, 50% used: 25% a day, gone in two more days, five before reset.
+  const fast = projectLimitWindow({ label: 'weekly', usedPercent: 50, windowSeconds: week, resetsAt: resetIn(120) }, now);
+  assert.equal(fast.beforeReset, true);
+  assert.equal(fast.runsOutAt, new Date(now + 48 * 3600000).toISOString());
+  assert.equal(fast.projectedAtReset, 175);
+
+  // Six days in, 30% used: on pace to last.
+  const slow = projectLimitWindow({ label: 'weekly', usedPercent: 30, windowSeconds: week, resetsAt: resetIn(24) }, now);
+  assert.equal(slow.beforeReset, false);
+  assert.equal(slow.projectedAtReset, 35);
+
+  assert.equal(projectLimitWindow({ usedPercent: 10, windowSeconds: week, resetsAt: resetIn(-1) }, now).stale, true);
+  assert.equal(projectLimitWindow({ usedPercent: 100, windowSeconds: week, resetsAt: resetIn(5) }, now).exhausted, true);
+  assert.equal(projectLimitWindow({ usedPercent: 10 }, now), undefined);
+});

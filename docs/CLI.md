@@ -141,6 +141,36 @@ Show ledger status.
 turntrail status
 ```
 
+## `usage`
+
+Token use across every agent on this machine, read from the transcripts Claude Code and Codex
+write.
+
+```bash
+turntrail usage
+turntrail usage --days 7 --by model
+turntrail usage --by day --json
+turntrail usage --prices ./prices.json
+```
+
+Turntrail reads the token counts Claude Code and Codex record in their chats on this machine:
+every model reply carries the provider's own usage figures. Nothing is sent anywhere. Counts are
+kept in four parts, because they cost and count against limits differently: new input, cache
+writes, cache reads, and output. **Work** is new input + cache writes + output, what each turn
+added; **cache reads** are the conversation re-read from the prompt cache every turn, most of the
+raw total and far cheaper. Gemini and Cursor transcripts carry no token counts, so they are not
+included.
+
+The default view gives each agent's work for the last hour, today, 7 days and the range, its burn
+rate per hour over the last 24 hours, and its cache reads. `--by day|model|project|account` breaks
+the range down instead. `--prices` takes JSON of US dollars per million tokens by model name or a
+prefix ending in `*` and adds an estimated cost.
+
+Codex is counted per turn, from each turn's own figure or its per-response record. Its running
+total is not used: a forked or resumed thread starts with its parent's total already in it, and
+summing totals counted that work again. Claude writes one reply as several lines with the same
+usage, and each reply is counted once.
+
 ## Accounts
 
 > **Codex only.** The CLI's account commands read Codex paths and the Codex usage endpoint.

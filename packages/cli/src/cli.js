@@ -21,6 +21,9 @@ import {
   normalizeNativeProvider,
   readManifest,
   removeAccount,
+  estimateUsageCost,
+  scanUsage,
+  summarizeUsage,
   resolveLedger,
   defaultCodexHome
 } from '@turntrail/core';
@@ -44,6 +47,7 @@ Usage:
   turntrail account use <id>
   turntrail account remove <id> [--purge]
   turntrail account maintain [--json]
+  turntrail usage [--days <n>] [--by agent|day|model|project|account] [--prices <file>] [--json]
 
 Account options:
   --import                Adopt the login already in the default CODEX_HOME
@@ -54,6 +58,17 @@ Account options:
   --purge                 Delete the managed credential and the live default
                           login when this account is active.
   --json                  Emit machine-readable maintenance results.
+
+Usage options:
+  --days <n>              How many days to cover (default 30).
+  --by <view>             agent (default), day, model, project or account.
+  --prices <file>         JSON of US dollars per million tokens by model name or
+                          prefix ending in *, e.g. {"claude-opus-5*": {"input": 5,
+                          "cacheWrite": 6.25, "cacheRead": 0.5, "output": 25}}.
+                          Adds an estimated cost; Turntrail ships no prices.
+  --json                  Emit the full summary as JSON.
+  Token figures come from the transcripts Claude Code and Codex write on this
+  machine; nothing is sent anywhere. Work is new input + cache writes + output.
 
 Export options:
   --max-chars <n>         Character budget for the transcript (default 120000, 0 = off).
@@ -191,6 +206,25 @@ export async function runCli(argv, io = process, dependencies = {}) {
     const result = await exportHandoff(cwd, exportOptions);
     io.stdout.write(`Wrote handoff to ${result.relativePath}\n`);
     io.stdout.write(renderExportMetrics(result.metrics));
+    return;
+  }
+
+  if (command === 'usage') {
+    const days = flags.days !== undefined ? Number(flags.days) : 30;
+    if (!Number.isFinite(days) || days < 1) throw new Error('--days must be a positive number.');
+    const index = await scanUsage();
+    const summary = summarizeUsage(index, { days, top: 20 });
+    let cost;
+    if (flags.prices) {
+      const prices = JSON.parse(await fs.promises.readFile(path.resolve(cwd, String(flags.prices)), 'utf8'));
+      cost = estimateUsageCost(summary.byModel, prices);
+    }
+    if (flags.json) {
+      io.stdout.write(`${JSON.stringify({ ...summary, cost }, null, 2)}
+`);
+      return;
+    }
+    io.stdout.write(renderUsage(summary, String(flags.by || 'agent'), cost));
     return;
   }
 
@@ -519,6 +553,48 @@ function renderAccountRow(account, usage, signedIn) {
     `    ${state}${detail ? ` — ${detail}` : ''}`,
     `    ${codexHome(account.id)}`
   ].join('\n');
+}
+
+// Millions or thousands, whichever reads best at a glance.
+function formatTokens(value) {
+  if (!value) return '0';
+  if (value >= 1e6) return `${(value / 1e6).toFixed(value >= 1e8 ? 0 : 1)}M`;
+  if (value >= 1e3) return `${(value / 1e3).toFixed(0)}k`;
+  return String(Math.round(value));
+}
+
+const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex' };
+
+export function renderUsage(summary, by = 'agent', cost) {
+  const lines = [`Token use, last ${summary.days} days (${summary.range.from} to ${summary.range.to})`, ''];
+  const table = (header, rows) => {
+    const widths = header.map((cell, i) => Math.max(cell.length, ...rows.map((row) => String(row[i]).length)));
+    const line = (row) => row.map((cell, i) => (i === 0 ? String(cell).padEnd(widths[i]) : String(cell).padStart(widths[i]))).join('  ');
+    lines.push(line(header), ...rows.map(line), '');
+  };
+  if (by === 'day') {
+    table(['Day', 'Claude work', 'Codex work', 'Claude cache', 'Codex cache'], summary.daily.map((point) => [
+      point.day, formatTokens(point.claude.work), formatTokens(point.codex.work), formatTokens(point.claude.cacheRead), formatTokens(point.codex.cacheRead)
+    ]));
+  } else if (by === 'model' || by === 'project' || by === 'account') {
+    const rows = { model: summary.byModel, project: summary.byProject, account: summary.byAccount }[by];
+    table([by[0].toUpperCase() + by.slice(1), 'Agent', 'Work', 'Cache reads', 'Calls'], rows.map((row) => [
+      row.label, AGENT_NAMES[row.agent] || row.agent, formatTokens(row.work), formatTokens(row.cacheRead), row.calls
+    ]));
+  } else {
+    table(['Agent', 'Last hour', 'Today', '7 days', `${summary.days} days`, 'Per hour (24h)', 'Cache reads'], ['claude', 'codex'].map((agent) => {
+      const w = summary.windows[agent];
+      const range = summary.daily.reduce((sum, point) => sum + point[agent].work, 0);
+      const cache = summary.daily.reduce((sum, point) => sum + point[agent].cacheRead, 0);
+      return [AGENT_NAMES[agent], formatTokens(w.lastHour.work), formatTokens(w.today.work), formatTokens(w.last7.work), formatTokens(range), formatTokens(summary.burnPerHour[agent]), formatTokens(cache)];
+    }));
+  }
+  if (cost) {
+    lines.push(`Estimated cost at the prices given: US$${cost.total.toFixed(2)} across ${cost.priced} model(s)` +
+      (cost.unpriced.length ? `; no price for ${cost.unpriced.join(', ')}` : ''), '');
+  }
+  lines.push('Work is new input + cache writes + output. Cache reads are the conversation re-read each turn.', '');
+  return lines.join('\n');
 }
 
 function renderStatus(manifest) {

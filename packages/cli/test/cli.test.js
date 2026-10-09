@@ -144,3 +144,29 @@ test('parent signals are forwarded once and listeners are removed after exit', a
   assert.equal(parent.listenerCount('SIGINT'), 0);
   assert.equal(parent.listenerCount('SIGTERM'), 0);
 });
+
+test('usage renders a burn summary per agent and a breakdown on request', async () => {
+  const { renderUsage } = await import('../src/cli.js');
+  const parts = (work, cacheRead = 0) => ({ fresh: work, cacheWrite: 0, cacheRead, output: 0, calls: 1, work });
+  const windows = () => ({ lastHour: parts(1_200), today: parts(3_400_000), last7: parts(17_600_000), last24h: parts(0), last30: parts(0) });
+  const summary = {
+    days: 2,
+    range: { from: '2026-10-08', to: '2026-10-09' },
+    windows: { claude: windows(), codex: windows() },
+    burnPerHour: { claude: 165_000, codex: 684_000 },
+    daily: [
+      { day: '2026-10-08', claude: parts(1_000_000, 5e7), codex: parts(2_000_000, 9e7) },
+      { day: '2026-10-09', claude: parts(2_500_000, 5e7), codex: parts(0) }
+    ],
+    byModel: [{ agent: 'codex', label: 'gpt-6.1-sol', work: 25_200_000, cacheRead: 545_000_000, calls: 3646 }],
+    byProject: [],
+    byAccount: []
+  };
+  const text = renderUsage(summary);
+  assert.match(text, /^Token use, last 2 days \(2026-10-08 to 2026-10-09\)/);
+  assert.match(text, /Claude Code\s+1k\s+3\.4M\s+17\.6M\s+3\.5M\s+165k\s+100M/);
+  assert.match(text, /Codex\s+1k\s+3\.4M\s+17\.6M\s+2\.0M\s+684k\s+90\.0M/);
+  assert.match(renderUsage(summary, 'model'), /gpt-6\.1-sol\s+Codex\s+25\.2M\s+545M\s+3646/);
+  assert.match(renderUsage(summary, 'day'), /2026-10-09\s+2\.5M\s+0/);
+  assert.match(renderUsage(summary, 'agent', { total: 12.345, priced: 1, unpriced: ['gpt-6.1-sol'] }), /US\$12\.35 across 1 model\(s\); no price for gpt-6\.1-sol/);
+});
