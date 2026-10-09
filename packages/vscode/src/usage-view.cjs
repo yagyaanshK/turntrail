@@ -155,8 +155,10 @@ function html(webview) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
-  /* Series colours from the reference categorical palette, slots 1 and 2,
-     validated for colour-blind separation on light and dark sidebars. */
+  /* Codex: reference palette blue. Claude: Anthropic's own Claude colour,
+     #D97757, in both themes. The pair passes colour-blind separation on light
+     and dark sidebars; on light its contrast is just under 3:1, so every
+     Claude figure is also written as text. */
   /* Models: four reference palette slots (yellow, magenta, green, violet),
      kept clear of the two agent colours; "Other" is neutral. Models stack in
      range order but keep an all-time colour, so any two can touch: this is the
@@ -173,14 +175,14 @@ function html(webview) {
     --dim: var(--vscode-descriptionForeground);
     --grid: rgba(128,128,128,0.18);
     --series-codex: #2a78d6;
-    --series-claude: #eb6834;
+    --series-claude: #D97757;
     --surface: var(--vscode-sideBar-background, #f8f8f8);
   }
   body.vscode-dark, body.vscode-high-contrast {
     --p-output: #008300; --p-new: #9085e9; --p-resent: #d55181; --p-cache: #6f6f69;
     --m0: #c98500; --m1: #d55181; --m2: #008300; --m3: #9085e9; --m-other: #77776f;
     --series-codex: #3987e5;
-    --series-claude: #d95926;
+    --series-claude: #D97757;
     --surface: var(--vscode-sideBar-background, #181818);
   }
   * { box-sizing: border-box; }
@@ -240,6 +242,9 @@ function html(webview) {
   .headline .big { font-size: 2em; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; margin: 2px 0 4px; }
   .by-agent { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.9em; margin-bottom: 10px; }
   .by-agent span { display: inline-flex; align-items: center; gap: 5px; }
+  .by-agent { margin-bottom: 6px; }
+  .compose.agents { height: 6px; margin-bottom: 12px; }
+  .bar-caption { color: var(--dim); font-size: 0.8em; margin-bottom: 4px; }
   .compose { display: flex; gap: 2px; height: 10px; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
   .parts { display: grid; gap: 4px; margin-bottom: 8px; }
   .part { display: grid; grid-template-columns: 10px 1fr auto 42px; gap: 8px; align-items: baseline; font-size: 0.9em; }
@@ -553,9 +558,15 @@ function pct(part, whole) {
 }
 function headline(summary) {
   const sum = rangeTotals(summary);
-  const perAgent = AGENTS.map(function (a) {
-    const t = summary.daily.reduce(function (s, p) { return s + p[a.id].total; }, 0);
-    return '<span><i class="swatch ' + a.cls + '"></i>' + esc(a.name) + ' ' + fmt(t) + '</span>';
+  const agentTotals = AGENTS.map(function (a) {
+    return { agent: a, total: summary.daily.reduce(function (s, p) { return s + p[a.id].total; }, 0) };
+  });
+  const perAgent = agentTotals.map(function (x) {
+    return '<span><i class="swatch ' + x.agent.cls + '"></i>' + esc(x.agent.name) + ' ' + fmt(x.total) + ' <span class="dim">' + pct(x.total, sum.total) + '</span></span>';
+  }).join('');
+  // The split between agents, so the swatches above it are a legend for something.
+  const agentBar = agentTotals.filter(function (x) { return x.total > 0; }).map(function (x) {
+    return '<div title="' + esc(x.agent.name + ': ' + fmt(x.total)) + '" style="flex:' + x.total + ' 0 2px;background:' + x.agent.color + '"></div>';
   }).join('');
   const burn = AGENTS.reduce(function (s, a) { return s + (summary.burnPerHour[a.id] || 0); }, 0);
   const today = AGENTS.reduce(function (s, a) { return s + summary.windows[a.id].today.total; }, 0);
@@ -572,6 +583,8 @@ function headline(summary) {
     '<div class="stat-label">Tokens processed \u00B7 ' + esc(rangeLabel(summary)) + '</div>' +
     '<div class="big">' + fmt(sum.total) + '</div>' +
     '<div class="by-agent">' + perAgent + '</div>' +
+    '<div class="compose agents" role="img" aria-label="Share of each agent">' + agentBar + '</div>' +
+    '<div class="bar-caption">By kind of token</div>' +
     '<div class="compose" role="img" aria-label="Share of each part">' + bar + '</div>' +
     '<div class="parts">' + legend + '</div>' +
     '<div class="stat-sub">Today ' + fmt(today) + ' \u00B7 ' + fmt(burn) + ' an hour over the last 24 hours</div>' +
