@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   assertAgentStopped,
   classifyAgentProcesses,
   listAgentProcesses,
   matchingAgentProcesses,
-  terminateAgentProcesses
+  terminateAgentProcesses,
+  unguardedAgentProcesses
 } from '../src/index.js';
+
+const CODEX_GUARD = 'Skipping token refresh because auth changed after guarded reload';
+const CLAUDE_GUARD = 'tengu_oauth_refresh_save_adopted_newer_write';
 
 const processes = [
   { pid: 10, name: 'Code.exe', commandLine: 'Code.exe --type=utility' },
@@ -227,4 +234,119 @@ test('process enumeration fails closed when the operating-system query fails', a
     listAgentProcesses({ platform: 'linux', execFile: async () => { throw new Error('permission denied'); } }),
     /Could not inspect running agent processes: permission denied/
   );
+});
+
+async function guardFixture(t) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-guard-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const write = async (name, content) => {
+    const file = path.join(directory, name);
+    await fs.writeFile(file, content);
+    return file;
+  };
+  return { directory, write, options: { accountsRoot: path.join(directory, 'accounts') } };
+}
+
+test('a running client whose binary carries its vendor guard does not block a switch', async (t) => {
+  const { write, options } = await guardFixture(t);
+  const current = await write('codex-current.exe', `binary ${CODEX_GUARD} binary`);
+  const old = await write('codex-old.exe', 'binary without the marker');
+  const claude = await write('claude.exe', `${CLAUDE_GUARD}`);
+  const running = [
+    { pid: 1, name: 'codex.exe', executablePath: current, commandLine: 'codex.exe app-server' },
+    { pid: 2, name: 'codex.exe', executablePath: old, commandLine: 'codex.exe' },
+    { pid: 3, name: 'claude.exe', executablePath: claude }
+  ];
+
+  assert.deepEqual((await unguardedAgentProcesses('codex', running, options)).map((item) => item.pid), [2]);
+  assert.deepEqual(await unguardedAgentProcesses('claude', running, options), []);
+  // The Codex marker in a Claude binary proves nothing about Claude.
+  assert.deepEqual(
+    (await unguardedAgentProcesses('claude', [{ pid: 4, name: 'claude.exe', executablePath: current }], options))
+      .map((item) => item.pid),
+    [4]
+  );
+
+  await assert.doesNotReject(assertAgentStopped('claude', { ...options, allowGuarded: true, agentProcesses: running }));
+  await assert.rejects(
+    assertAgentStopped('codex', { ...options, allowGuarded: true, agentProcesses: running }),
+    /codex\.exe \(PID 2\).*too old to notice a login change.*did not change the live credential/i
+  );
+  // Without the opt-in, every running client still blocks.
+  await assert.rejects(assertAgentStopped('claude', { ...options, agentProcesses: running }), /PID 3/);
+});
+
+test('a client whose code cannot be read or recognised is treated as unguarded', async (t) => {
+  const { write, options } = await guardFixture(t);
+  const script = await write('cli.js', `/* ${CLAUDE_GUARD} */`);
+  const running = [
+    { pid: 1, name: 'codex.exe' },
+    { pid: 2, name: 'codex.exe', executablePath: path.join(options.accountsRoot, 'missing.exe') },
+    { pid: 3, name: 'node', commandLine: 'node /opt/node_modules/@openai/codex/bin/codex.js' }
+  ];
+  assert.deepEqual((await unguardedAgentProcesses('codex', running, options)).map((item) => item.pid), [1, 2, 3]);
+
+  const npmClaude = { pid: 5, name: 'node', commandLine: `node "${script.replace('cli.js', '@anthropic-ai/claude-code/cli.js')}"` };
+  assert.deepEqual((await unguardedAgentProcesses('claude', [npmClaude], options)).map((item) => item.pid), [5]);
+
+  const installed = path.join(path.dirname(script), 'node_modules', '@anthropic-ai', 'claude-code');
+  await fs.mkdir(installed, { recursive: true });
+  await fs.copyFile(script, path.join(installed, 'cli.js'));
+  const guardedNpm = { pid: 6, name: 'node', commandLine: `node "${path.join(installed, 'cli.js')}" --resume` };
+  assert.deepEqual(await unguardedAgentProcesses('claude', [guardedNpm], options), []);
+});
+
+test('hosts and launchers that hold no login of their own are left to the process that does', async (t) => {
+  const { write, options } = await guardFixture(t);
+  const native = await write('codex.exe', CODEX_GUARD);
+  const running = [
+    {
+      pid: 20,
+      name: 'ChatGPT.exe',
+      executablePath: 'C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.901.5280.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe'
+    },
+    { pid: 21, parentPid: 20, name: 'codex.exe', executablePath: native, commandLine: 'codex.exe app-server' },
+    { pid: 22, parentPid: 21, name: 'codex-code-mode-host.exe', executablePath: 'C:\\x\\codex-code-mode-host.exe' },
+    { pid: 30, name: 'node', commandLine: 'node /opt/node_modules/@openai/codex/bin/codex.js' },
+    { pid: 31, parentPid: 30, name: 'codex', executablePath: native }
+  ];
+  assert.deepEqual(await unguardedAgentProcesses('codex', running, options), []);
+});
+
+test('the guard check finds a marker split across read chunks and remembers each file', async (t) => {
+  const { write, options } = await guardFixture(t);
+  const chunk = 4 * 1024 * 1024;
+  const marker = Buffer.from(CODEX_GUARD);
+  const content = Buffer.alloc(chunk + marker.length, 0x20);
+  marker.copy(content, chunk - 10);
+  const file = await write('large-codex.exe', content);
+  const running = [{ pid: 9, name: 'codex.exe', executablePath: file }];
+
+  assert.deepEqual(await unguardedAgentProcesses('codex', running, options), []);
+  const cached = JSON.parse(await fs.readFile(path.join(options.accountsRoot, 'auth-guards.json'), 'utf8'));
+  assert.deepEqual(Object.values(cached).map((entry) => entry.guarded), [true]);
+
+  // A rebuilt binary at the same path is read again rather than trusted.
+  await fs.writeFile(file, 'an older build without the marker');
+  assert.deepEqual((await unguardedAgentProcesses('codex', running, options)).map((item) => item.pid), [9]);
+});
+
+test('stopping for a switch leaves guarded clients running', async (t) => {
+  const { write, options } = await guardFixture(t);
+  const current = await write('codex-current.exe', CODEX_GUARD);
+  const old = await write('codex-old.exe', 'old');
+  const guarded = { pid: 1, name: 'codex.exe', executablePath: current };
+  const samples = [[guarded, { pid: 2, name: 'codex.exe', executablePath: old }], [guarded]];
+  const killed = [];
+  const result = await terminateAgentProcesses('codex', {
+    ...options,
+    onlyUnguarded: true,
+    platform: 'win32',
+    listAgentProcesses: async () => samples.shift() || [guarded],
+    killProcess: (pid) => killed.push(pid),
+    sleep: async () => {},
+    now: (() => { let value = 0; return () => ++value; })()
+  });
+  assert.deepEqual(killed, [2]);
+  assert.deepEqual(result.remaining, []);
 });

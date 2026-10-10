@@ -1,6 +1,10 @@
 import { execFile } from 'node:child_process';
+import fsSync from 'node:fs';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { readJson, writeJson } from '../fs-utils.js';
+import { accountsRoot } from './store.js';
 
 const execFileAsync = promisify(execFile);
 const WINDOWS_POWERSHELL = path.join(
@@ -49,8 +53,15 @@ export function classifyAgentProcesses(provider, processes) {
   });
 }
 
+// With `allowGuarded`, a running client that re-reads the login before it
+// refreshes (see unguardedAgentProcesses) does not block: it cannot write the
+// previous account back over the new one. Every other caller still requires
+// the provider to be fully stopped.
 export async function assertAgentStopped(provider, options = {}) {
-  const matches = matchingAgentProcesses(provider, await listAgentProcesses(options));
+  const processes = await listAgentProcesses(options);
+  const matches = options.allowGuarded
+    ? await unguardedAgentProcesses(provider, processes, options)
+    : matchingAgentProcesses(provider, processes);
   if (matches.length === 0) return;
 
   const label = provider === 'claude' ? 'Claude' : 'Codex';
@@ -59,11 +70,104 @@ export async function assertAgentStopped(provider, options = {}) {
     .map((item) => `${item.name || 'process'}${item.pid ? ` (PID ${item.pid})` : ''}`)
     .join(', ');
   const extra = matches.length > 3 ? ` and ${matches.length - 3} more` : '';
-  throw new Error(
-    `${label} is still running: ${details}${extra}. ` +
-      `Close its CLI sessions and desktop app, and close or reload IDE windows hosting the ${label} extension, then retry. ` +
-      'Turntrail did not change the live credential.'
+  const advice = options.allowGuarded
+    ? `These run a ${label} too old to notice a login change. Close or update them, then retry. `
+    : `Close its CLI sessions and desktop app, and close or reload IDE windows hosting the ${label} extension, then retry. `;
+  throw new Error(`${label} is still running: ${details}${extra}. ${advice}Turntrail did not change the live credential.`);
+}
+
+// Current builds of both agents re-read the shared login before refreshing it
+// and back off when another process changed it: Codex skips the refresh
+// ("auth changed after guarded reload"), Claude Code only saves over the token
+// it posted and otherwise adopts the newer one. A running client with that
+// guard may stay on the previous account until restarted, but it cannot undo a
+// switch. These strings are what each vendor's own binary carries; they are
+// observed, not a published contract, so a build without them is treated as
+// unguarded and must stop first.
+const AUTH_GUARD_MARKERS = {
+  codex: 'Skipping token refresh because auth changed after guarded reload',
+  claude: 'tengu_oauth_refresh_save_adopted_newer_write'
+};
+const AUTH_GUARD_CACHE_FILE = 'auth-guards.json';
+const guardCache = new Map();
+
+// The running processes of this provider that hold its login and cannot be
+// shown to carry the guard. Unknown means unguarded: a process whose image
+// cannot be read, or a client Turntrail does not recognise, still blocks.
+export async function unguardedAgentProcesses(provider, processes, options = {}) {
+  const all = (processes || []).map(normalizeProcess);
+  const scan = options.scanAuthGuard || ((file) => fileHasAuthGuard(provider, file, options));
+  const unguarded = [];
+  for (const item of matchingAgentProcesses(provider, all)) {
+    const image = authHolderImage(provider, item, all);
+    if (image === null) continue;
+    if (!image || !(await scan(image).catch(() => false))) unguarded.push(item);
+  }
+  return unguarded;
+}
+
+// The file whose code handles the login for this process, null when the
+// process holds no login of its own, or undefined when it cannot be told.
+function authHolderImage(provider, item, all) {
+  const name = processName(item);
+  // The Codex desktop host drives a codex app-server child, which is checked
+  // in its own right, and the code-mode host carries no login code at all.
+  if (provider === 'codex' && (isCodexDesktopHost(item) || name === 'codex-code-mode-host')) return null;
+  if (name === provider) return item.executablePath || undefined;
+
+  // An npm launcher that has started the native binary leaves the login to it.
+  const nativeChild = all.some((candidate) => candidate.parentPid === item.pid && processName(candidate) === provider);
+  if (item.pid && nativeChild) return null;
+  const pkg = provider === 'claude' ? '@anthropic-ai/claude-code/' : '@openai/codex/';
+  const script = commandTokens(item.commandLine).find((token) =>
+    token.toLowerCase().replaceAll('\\', '/').includes(pkg) && /\.[cm]?js$/i.test(token)
   );
+  return script || undefined;
+}
+
+function commandTokens(commandLine) {
+  return (String(commandLine || '').match(/"[^"]*"|'[^']*'|\S+/g) || []).map((token) => token.replace(/^["']|["']$/g, ''));
+}
+
+// A binary is several hundred megabytes, so the answer is kept per file, in
+// memory and in the accounts directory, keyed by size and modification time.
+async function fileHasAuthGuard(provider, file, options = {}) {
+  const marker = AUTH_GUARD_MARKERS[provider];
+  const stat = await fs.stat(file);
+  const key = `${provider}|${path.resolve(file).toLowerCase()}`;
+  const stamp = `${stat.size}|${Math.trunc(stat.mtimeMs)}`;
+  const known = guardCache.get(key);
+  if (known?.stamp === stamp) return known.guarded;
+
+  const cachePath = path.join(accountsRoot(options), AUTH_GUARD_CACHE_FILE);
+  const stored = await readJson(cachePath).catch(() => ({}));
+  let guarded = stored?.[key]?.stamp === stamp ? stored[key].guarded === true : undefined;
+  if (guarded === undefined) {
+    guarded = await fileContains(file, marker);
+    const next = { ...(stored && typeof stored === 'object' ? stored : {}), [key]: { stamp, guarded } };
+    await writeJson(cachePath, next).catch(() => {});
+  }
+  guardCache.set(key, { stamp, guarded });
+  return guarded;
+}
+
+function fileContains(file, text) {
+  const needle = Buffer.from(text, 'latin1');
+  return new Promise((resolve, reject) => {
+    const stream = fsSync.createReadStream(file, { highWaterMark: 4 * 1024 * 1024 });
+    let tail = Buffer.alloc(0);
+    stream.on('data', (chunk) => {
+      const window = tail.length ? Buffer.concat([tail, chunk]) : chunk;
+      if (window.indexOf(needle) !== -1) {
+        stream.destroy();
+        resolve(true);
+        return;
+      }
+      tail = window.subarray(Math.max(0, window.length - needle.length + 1));
+    });
+    stream.on('error', reject);
+    stream.on('close', () => resolve(false));
+  });
 }
 
 // Stop only processes that still match the provider at execution time. The
@@ -82,9 +186,17 @@ export async function terminateAgentProcesses(provider, options = {}) {
   const firstSeenAt = new Map();
   const terminated = new Map();
   let remaining = [];
+  // With `onlyUnguarded`, guarded clients are left running: they cannot block
+  // a switch, so stopping them would only interrupt their work.
+  const blocking = async () => {
+    const processes = await listAgentProcesses(options);
+    return options.onlyUnguarded
+      ? unguardedAgentProcesses(provider, processes, options)
+      : matchingAgentProcesses(provider, processes);
+  };
 
   while (now() < deadline) {
-    remaining = matchingAgentProcesses(provider, await listAgentProcesses(options));
+    remaining = await blocking();
     if (remaining.length === 0) return { terminated: [...terminated.values()], remaining: [] };
 
     for (const item of remaining) {
@@ -105,7 +217,7 @@ export async function terminateAgentProcesses(provider, options = {}) {
     await sleep(pollMs);
   }
 
-  remaining = matchingAgentProcesses(provider, await listAgentProcesses(options));
+  remaining = await blocking();
   return { terminated: [...terminated.values()], remaining };
 }
 

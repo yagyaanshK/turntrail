@@ -255,7 +255,7 @@ export async function activateCodexAccount(accountId, options = {}) {
   const accounts = await listAccounts({ ...options, provider: CODEX_PROVIDER });
   const outgoing = await activeCodexAccountId(accounts, options);
   const alreadyActive = outgoing === accountId;
-  await assertAgentStopped(CODEX_PROVIDER, options);
+  await assertAgentStopped(CODEX_PROVIDER, { ...options, allowGuarded: true });
 
   // Capture whatever the live Codex has been refreshing back into its own
   // account's snapshot before we overwrite it. Without this, every token Codex
@@ -300,7 +300,7 @@ export async function activateCodexAccount(accountId, options = {}) {
     await fs.copyFile(targetAuth, backup);
   }
 
-  await assertAgentStopped(CODEX_PROVIDER, options);
+  await assertAgentStopped(CODEX_PROVIDER, { ...options, allowGuarded: true });
   await copyCredential(codexAuthPath(codexHome(accountId, options)), targetAuth);
   await updateAccount(accountId, { lastUsedAt: new Date().toISOString() }, options);
   return { target: targetAuth, backup, alreadyActive };
@@ -422,7 +422,7 @@ export async function restoreCodexBackup(options = {}) {
   const legacy = path.join(target, 'auth.context-bridge-backup.json');
   const backup = (await pathExists(canonical)) ? canonical : (await pathExists(legacy)) ? legacy : undefined;
   if (!backup) throw new Error('No Turntrail backup to restore.');
-  await assertAgentStopped(CODEX_PROVIDER, options);
+  await assertAgentStopped(CODEX_PROVIDER, { ...options, allowGuarded: true });
   await copyCredential(backup, codexAuthPath(target));
   return { restored: codexAuthPath(target) };
 }

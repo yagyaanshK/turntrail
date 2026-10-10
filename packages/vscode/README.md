@@ -248,14 +248,19 @@ detects a login revoked server-side even when its local JWT expiry is still in t
 verification leaves the current live credential untouched instead of reporting a file copy as a
 successful account switch.
 
-If the provider is already stopped, **Use this** switches immediately. If an IDE background service
-or interactive process is running, Turntrail offers **Stop Processes & Switch** or **Wait for Me to
-Stop Them**. The first action terminates only matching provider processes after warning that active
-runs can be interrupted. The second uses a detached helper to wait until all provider processes have
-exited, perform the guarded switch, and reopen the initiating workspace. Unrelated editor windows do
-not need to close, but a window that keeps restarting its provider extension service may need to be
-closed or have that extension disabled. A queued request expires after 15 minutes and never contains
-credentials.
+If the provider is stopped, **Use this** switches immediately. Current Codex and Claude Code
+builds can stay running through a switch: before refreshing, they re-read the login and back off if
+another process changed it, so they cannot write the previous account back. Turntrail confirms that
+for each running client by finding its vendor's guard in the client's own executable or script,
+checked once per file and remembered by size and date. Open Codex sessions keep the previous account
+until their window is reloaded or the Codex app restarts; Claude Code should pick up the new login
+by itself.
+
+If an older build without that guard is running, or one Turntrail cannot read, Turntrail lists those
+processes and offers two options. **Option 1** ends only them and switches at once, interrupting
+whatever they were doing. **Option 2** waits up to 15 minutes for you to close them and then switches
+by itself, reopening the initiating workspace if you closed that window. Updating the agent removes
+the need for either. A queued request never contains credentials.
 
 | Action | Effect |
 |--------|--------|

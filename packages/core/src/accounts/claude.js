@@ -195,7 +195,7 @@ export async function activateClaudeAccount(accountId, options = {}) {
     await updateAccount(accountId, { lastUsedAt: new Date().toISOString() }, options);
     return { target: targetCredentials, alreadyActive: true };
   }
-  await assertAgentStopped(CLAUDE_PROVIDER, options);
+  await assertAgentStopped(CLAUDE_PROVIDER, { ...options, allowGuarded: true });
 
   const profile = await readClaudeProfile(claudeHome(accountId, options), options);
   const config = claudeConfigPath(target, options);
@@ -218,7 +218,7 @@ export async function activateClaudeAccount(accountId, options = {}) {
   if (Number.isFinite(expiresAt) && expiresAt - EXPIRY_SKEW_MS <= Date.now()) {
     throw new Error(`Account "${accountId}" has expired and cannot be renewed. Sign in again.`);
   }
-  await assertAgentStopped(CLAUDE_PROVIDER, options);
+  await assertAgentStopped(CLAUDE_PROVIDER, { ...options, allowGuarded: true });
 
   let backup;
   if (await pathExists(targetCredentials)) {
@@ -259,7 +259,7 @@ export async function restoreClaudeBackup(options = {}) {
     legacyClaudeCredentialsBackupPath(target)
   ]);
   if (!backup) throw new Error('No Turntrail backup to restore.');
-  await assertAgentStopped(CLAUDE_PROVIDER, options);
+  await assertAgentStopped(CLAUDE_PROVIDER, { ...options, allowGuarded: true });
   await copyCredential(backup, claudeCredentialsPath(target));
 
   const config = claudeConfigPath(target, options);

@@ -66,8 +66,10 @@ async function waitForProviderStop(provider, deadlineAt, core, options = {}) {
         .join(', ');
       throw new Error(`Timed out waiting for ${provider === 'claude' ? 'Claude' : 'Codex'} to stop${details ? `: ${details}` : ''}.`);
     }
+    // Only clients that could write the previous login back must exit; the
+    // switch routine itself enforces the same rule again before writing.
     const processes = await core.listAgentProcesses();
-    lastMatches = core.matchingAgentProcesses(provider, processes);
+    lastMatches = await core.unguardedAgentProcesses(provider, processes);
     quiet = lastMatches.length === 0 ? quiet + 1 : 0;
     if (quiet < quietPolls) await sleep(pollMs);
   }

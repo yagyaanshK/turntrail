@@ -424,18 +424,23 @@ that means two files: the credential, plus the `oauthAccount` key inside `~/.cla
 that is where the displayed email actually lives. Everything else in that file — project history,
 caches — is left byte-identical, and both files are backed up first.
 
-Turntrail checks the operating-system process list immediately before replacing the credential. If
-the provider is stopped, the switch is immediate. If `codex`, `claude`, the Codex Windows desktop
-app, or an IDE background service is running, the extension offers **Stop Processes & Switch** or
-**Wait for Me to Stop Them**. The Codex Windows package currently hosts its desktop UI in
-`ChatGPT.exe`; Turntrail recognizes it only from the package-qualified `OpenAI.Codex` path, so a
-separate ChatGPT installation is not treated as Codex. The
-first action explicitly terminates only matching provider processes after warning that active runs
-can be interrupted. The second starts a detached helper that waits until every provider process has
-exited for three consecutive polls, performs the same guarded switch, and reopens the initiating
-workspace. Unrelated editor windows can remain open, but a window whose Codex or Claude extension
-keeps restarting its provider service may need to be closed or have that extension disabled. The
-credential path is machine-wide across compatible editors, CLI sessions, and desktop clients.
+Turntrail checks the operating-system process list immediately before replacing the credential.
+The Codex Windows package hosts its desktop UI in `ChatGPT.exe`; Turntrail recognizes it only from
+the package-qualified `OpenAI.Codex` path, so a separate ChatGPT installation is not treated as
+Codex. If the provider is stopped, **Use this** switches immediately. Current Codex and Claude Code
+builds can stay running through a switch: before refreshing, they re-read the login and back off if
+another process changed it, so they cannot write the previous account back. Turntrail confirms that
+for each running client by finding its vendor's guard in the client's own executable or script,
+checked once per file and remembered by size and date. Open Codex sessions keep the previous account
+until their window is reloaded or the Codex app restarts; Claude Code should pick up the new login
+by itself.
+
+If an older build without that guard is running, or one Turntrail cannot read, Turntrail lists those
+processes and offers two options. **Option 1** ends only them and switches at once, interrupting
+whatever they were doing. **Option 2** waits up to 15 minutes for you to close them and then switches
+by itself, reopening the initiating workspace if you closed that window. Updating the agent removes
+the need for either. A queued request never contains credentials. The credential path is
+machine-wide across compatible editors, CLI sessions, and desktop clients.
 
 Before installing a Codex OAuth account, Turntrail renews its saved refresh token even when the
 access-token JWT still claims to be unexpired. This verifies the login with OpenAI and catches

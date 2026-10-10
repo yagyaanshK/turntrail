@@ -115,7 +115,8 @@ export {
   classifyAgentProcesses,
   listAgentProcesses,
   matchingAgentProcesses,
-  terminateAgentProcesses
+  terminateAgentProcesses,
+  unguardedAgentProcesses
 } from './accounts/processes.js';
 export {
   codexLoginArgs,

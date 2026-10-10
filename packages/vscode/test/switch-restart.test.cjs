@@ -134,7 +134,7 @@ test('the worker waits for consecutive quiet polls before switching', async () =
       reads++;
       return samples.shift() || [];
     },
-    matchingAgentProcesses(_provider, processes) {
+    async unguardedAgentProcesses(_provider, processes) {
       return processes;
     }
   };
@@ -164,7 +164,7 @@ test('the worker validates the account, waits, switches, records success, and re
     async listAgentProcesses() {
       return [];
     },
-    matchingAgentProcesses() {
+    async unguardedAgentProcesses() {
       return [];
     },
     async activateCodexAccount(id) {
@@ -199,7 +199,7 @@ test('an editor relaunch failure does not misreport or roll back a completed swi
   const core = {
     async getAccount(id) { return { id, provider: 'codex' }; },
     async listAgentProcesses() { return []; },
-    matchingAgentProcesses() { return []; },
+    async unguardedAgentProcesses() { return []; },
     async activateCodexAccount() { return { target: path.resolve('auth.json') }; }
   };
   const result = await main(queued.requestPath, {
@@ -220,7 +220,7 @@ test('the worker times out with the process that remains active', async () => {
       now += 1000;
       return [{ pid: 7, name: 'codex.exe' }];
     },
-    matchingAgentProcesses(_provider, processes) {
+    async unguardedAgentProcesses(_provider, processes) {
       return processes;
     }
   };

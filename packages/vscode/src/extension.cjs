@@ -216,7 +216,8 @@ async function switchAccount(item) {
     return undefined;
   });
   if (!processes) return;
-  const blockers = api.classifyAgentProcesses(account.provider, processes);
+  const running = api.matchingAgentProcesses(account.provider, processes).length > 0;
+  const blockers = await unguardedBlockers(account.provider, processes, api);
   if (blockers.length > 0) {
     const proceed = await handleRunningProviderProcesses(account, blockers, api);
     if (!proceed) return;
@@ -227,7 +228,7 @@ async function switchAccount(item) {
   let result = await activate(account.id).catch(captureFailure);
   if (result?.error) {
     const raced = await api.listAgentProcesses().catch(() => []);
-    const racedBlockers = api.classifyAgentProcesses(account.provider, raced);
+    const racedBlockers = await unguardedBlockers(account.provider, raced, api);
     if (racedBlockers.length > 0) {
       const proceed = await handleRunningProviderProcesses(account, racedBlockers, api);
       if (!proceed) return;
@@ -250,9 +251,16 @@ async function switchAccount(item) {
     ? ` · ${formatPercent(Math.min(...usage.windows.map((window) => window.remainingPercent)))} left`
     : '';
 
+  // Guarded clients were left running. Codex keeps the previous account until
+  // restarted; Claude Code re-reads its credentials when they change on disk.
+  const openSessions = !running
+    ? ' Reload if an open session does not pick it up.'
+    : account.provider === 'codex'
+      ? ' Codex sessions that were already open stay on the previous account until you reload their window or restart the Codex app.'
+      : ' Open Claude Code sessions should pick up the new login by themselves; reload a window if one does not.';
   vscode.window
     .showInformationMessage(
-      `${agentName(account.provider)} is now using "${account.label}"${remaining}. Reload if an open session does not pick it up.`,
+      `${agentName(account.provider)} is now using "${account.label}"${remaining}.${openSessions}`,
       'Reload Window',
       'Undo'
     )
@@ -262,36 +270,51 @@ async function switchAccount(item) {
     });
 }
 
+// The running clients that would block a switch, classified for the dialog.
+// Clients that carry their vendor's guard are left out: they cannot write the
+// previous login back, so they can keep running through the switch. The first
+// check reads each binary once, so it can take a few seconds.
+async function unguardedBlockers(provider, processes, api) {
+  if (api.matchingAgentProcesses(provider, processes).length === 0) return [];
+  const unguarded = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: `Turntrail: checking running ${agentName(provider)} processes` },
+    () => api.unguardedAgentProcesses(provider, processes)
+  );
+  const pids = new Set(unguarded.map((item) => item.pid));
+  return api.classifyAgentProcesses(provider, processes).filter((item) => pids.has(item.pid));
+}
+
 async function handleRunningProviderProcesses(account, blockers, api) {
   const agent = agentName(account.provider);
-  const editors = [...new Set(blockers.map((item) => item.editor).filter(Boolean))];
-  const desktopClients = [...new Set(blockers.map((item) => item.client).filter(Boolean))];
-  const interactive = blockers.filter((item) => item.kind === 'interactive');
-  const processNames = [...new Set(blockers.map((item) => item.name).filter(Boolean))].slice(0, 4).join(', ');
-  const locations = editors.length > 0 ? ` Editor services: ${editors.join(', ')}.` : '';
-  const desktops = desktopClients.length > 0 ? ` Desktop clients: ${desktopClients.join(', ')}.` : '';
-  const sessions = interactive.length > 0
-    ? ` ${interactive.length} other ${agent} process${interactive.length === 1 ? ' is' : 'es are'} also running.`
-    : '';
+  const listed = blockers.slice(0, 4).map((item) => {
+    const where = item.editor ? ` in ${item.editor}` : item.client ? ` in the ${item.client}` : '';
+    const file = item.executablePath ? ` — ${item.executablePath}` : '';
+    return `• ${item.name || 'process'} (PID ${item.pid})${where}${file}`;
+  });
+  if (blockers.length > 4) listed.push(`• and ${blockers.length - 4} more`);
   const choice = await vscode.window.showWarningMessage(
-    `${agent} must stop before Turntrail can safely switch to "${account.label}".`,
+    `Some ${agent} processes must close before switching to "${account.label}".`,
     {
       modal: true,
       detail:
-        `Running provider processes${processNames ? `: ${processNames}` : ''}.${locations}${desktops}${sessions}\n\n` +
-        `Every ${agent} client that owns the shared login must stop, including CLI sessions, desktop clients, ` +
-        `and IDE extension services. Unrelated editor windows can stay open.\n\n` +
-        `Stopping these processes can interrupt active agent runs. Turntrail can stop them now, or wait while ` +
-        `you close the relevant clients yourself.`
+        `${listed.join('\n')}\n\n` +
+        `These run an older ${agent} that does not notice a login change and could write the previous login ` +
+        `back over the new one. Other ${agent} sessions can stay open. Updating ${agent} lets Turntrail switch ` +
+        `without closing anything.\n\n` +
+        `Option 1 — Close them and switch now.\nTurntrail ends only the processes above and switches at once. ` +
+        `Any task they are running is interrupted.\n\n` +
+        `Option 2 — Wait for me to close them.\nTurntrail keeps watching for up to 15 minutes and switches as soon ` +
+        `as they have exited. If you have to close this editor window to stop them, Turntrail reopens it on this ` +
+        `workspace after the switch.`
     },
-    'Stop Processes & Switch',
-    'Wait for Me to Stop Them'
+    'Option 1',
+    'Option 2'
   );
-  if (choice === 'Wait for Me to Stop Them') {
+  if (choice === 'Option 2') {
     await queueSwitchAfterProviderStops(account, blockers);
     return false;
   }
-  if (choice !== 'Stop Processes & Switch') return false;
+  if (choice !== 'Option 1') return false;
 
   const stopped = await vscode.window.withProgress(
     {
@@ -299,7 +322,7 @@ async function handleRunningProviderProcesses(account, blockers, api) {
       title: `Stopping ${agent} processes`,
       cancellable: false
     },
-    () => api.terminateAgentProcesses(account.provider)
+    () => api.terminateAgentProcesses(account.provider, { onlyUnguarded: true })
   ).catch((error) => ({ error: error.message }));
 
   if (stopped?.error) {
@@ -352,9 +375,10 @@ async function queueSwitchAfterProviderStops(account, blockers) {
 
   const affected = editors.length > 0
     ? ` Stop ${agent} in ${editors.join(' and ')}; close those editor windows only if their extension service will not stop.`
-    : ` Close every running ${agent} CLI or desktop client.`;
+    : ` Close the ${agent} processes it listed.`;
   vscode.window.showInformationMessage(
-    `Turntrail is waiting to switch to "${account.label}".${affected} The initiating editor will reopen if it was closed.`
+    `Turntrail will switch to "${account.label}" as soon as they have exited, within 15 minutes.${affected} ` +
+      'If you close this window, it reopens here after the switch.'
   );
 }
 

@@ -286,18 +286,25 @@ confirmation toast offers **Undo**.
 Turntrail checks for native `codex` and `claude` processes immediately before replacing a login. On
 Windows it also detects the Codex desktop app's `ChatGPT.exe` host by its package-qualified
 `OpenAI.Codex` executable path; it does not match an unrelated ChatGPT installation by name alone.
-If the provider is stopped, **Use this** switches immediately. If an interactive session, Codex
-desktop client, or IDE background service is running, choose **Stop Processes & Switch** to terminate matching provider
-processes after an explicit interruption warning, or **Wait for Me to Stop Them** to queue the
-switch. The detached helper waits for every process to exit, requires three consecutive quiet polls,
-runs the same guarded switch, and reopens the initiating workspace. Unrelated editor windows can
-stay open. Close a relevant editor window only when its provider extension service keeps restarting;
-the default credential is machine-wide across editors, CLIs, and desktop clients.
+If the provider is stopped, **Use this** switches immediately. Current Codex and Claude Code
+builds can stay running through a switch: before refreshing, they re-read the login and back off if
+another process changed it, so they cannot write the previous account back. Turntrail confirms that
+for each running client by finding its vendor's guard in the client's own executable or script,
+checked once per file and remembered by size and date. Open Codex sessions keep the previous account
+until their window is reloaded or the Codex app restarts; Claude Code should pick up the new login
+by itself.
 
-Ignoring an idle-looking `codex.exe app-server` is unsafe: Codex can retain the old account in memory
-and refresh its persisted token later. Queuing keeps the strict process check while making it usable
-from the extension. Requests expire after 15 minutes and contain no tokens. A timeout, a restarted
-provider, or a failed account validation leaves the live credential unchanged.
+If an older build without that guard is running, or one Turntrail cannot read, Turntrail lists those
+processes and offers two options. **Option 1** ends only them and switches at once, interrupting
+whatever they were doing. **Option 2** waits up to 15 minutes for you to close them and then switches
+by itself, reopening the initiating workspace if you closed that window. Updating the agent removes
+the need for either. A queued request never contains credentials.
+
+Ignoring an unguarded client is unsafe: a `codex.exe app-server` or `claude` without the guard can
+retain the old account in memory and refresh its persisted token later. The helper behind Option 2
+waits only for those clients, requires three consecutive quiet polls, and runs the same guarded
+switch. A timeout, a restarted provider, or a failed account validation leaves the live credential
+unchanged.
 
 Codex activation validates an OAuth account by rotating its refresh token before installing it,
 even if the access-token JWT has not reached its local expiry. This catches credentials revoked by
