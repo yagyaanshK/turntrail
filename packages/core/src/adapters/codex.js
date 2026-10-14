@@ -433,7 +433,6 @@ async function inspectCodexFile(filePath, options) {
   let cwd;
   let source;
   let forkedFrom;
-  const messages = [];
 
   for (const event of objects) {
     if (event.type === 'session_meta') {
@@ -442,11 +441,6 @@ async function inspectCodexFile(filePath, options) {
       source ||= codexSurface(event.payload?.source, event.payload?.originator);
       forkedFrom ||= event.payload?.forked_from_id;
     }
-    // The event stream records the message as sent; the response stream records
-    // it again alongside the model's view of it. One is enough.
-    if (event.type === 'event_msg' && event.payload?.type === 'user_message') {
-      messages.push(contentToText(event.payload.message));
-    }
   }
 
   return {
@@ -454,21 +448,39 @@ async function inspectCodexFile(filePath, options) {
     cwd,
     source,
     forkedFrom,
-    ...describeRequests(messages)
+    ...describeRequests(codexRequestTexts(objects))
   };
+}
+
+// What the user asked, in order. Codex used to record each message twice: as
+// sent (`event_msg/user_message`) and as the model saw it (`response_item`).
+// One is enough, and the event is the cleaner of the two. Builds from 2026 write
+// only the response item, with the injected AGENTS.md and environment blocks as
+// separate text parts beside the request, so each part is offered on its own
+// and the injected ones are recognised and dropped downstream.
+function codexRequestTexts(objects) {
+  const sent = objects
+    .filter((event) => event.type === 'event_msg' && event.payload?.type === 'user_message')
+    .map((event) => contentToText(event.payload.message));
+  if (sent.length > 0) return sent;
+
+  const texts = [];
+  for (const event of objects) {
+    const payload = event.payload;
+    if (event.type !== 'response_item' || payload?.type !== 'message' || payload.role !== 'user') continue;
+    for (const part of Array.isArray(payload.content) ? payload.content : [payload.content]) {
+      if (isImagePart(part) || isFilePart(part)) continue;
+      const text = contentToText(part);
+      if (text.trim()) texts.push(text);
+    }
+  }
+  return texts;
 }
 
 // The most recent request in a session, read from the tail so a 400 MB
 // transcript costs the same as a small one.
 function latestCodexRequest(filePath, options) {
-  return readLatestRequest(
-    filePath,
-    (objects) =>
-      objects
-        .filter((event) => event.type === 'event_msg' && event.payload?.type === 'user_message')
-        .map((event) => contentToText(event.payload.message)),
-    options
-  );
+  return readLatestRequest(filePath, codexRequestTexts, options);
 }
 
 function sessionIdFromCodexPath(filePath) {

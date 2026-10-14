@@ -21,6 +21,7 @@ class UsageStore {
     this.error = undefined;
     this.running = undefined;
     this.scannedOnce = false;
+    this.storage = [];
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
   }
@@ -44,6 +45,8 @@ class UsageStore {
       this.index = await api.readUsageIndex();
       this.error = undefined;
       this.scannedOnce = true;
+      // Chats the scan could not read are missing from the totals; say so.
+      this.storage = await api.usageStorageProblems().catch(() => []);
     })()
       .catch((error) => {
         this.error = error instanceof Error ? error.message : String(error);
@@ -76,6 +79,7 @@ class UsageStore {
       loading: this.loading,
       firstScan: this.loading && !hasData,
       error: this.error,
+      storage: (this.storage || []).map((problem) => String(problem.message || '')),
       summary,
       limits,
       cost
@@ -276,6 +280,7 @@ function html(webview) {
   .session-meta { color: var(--dim); font-size: 0.82em; margin: 2px 0 0 16px; }
   .empty { color: var(--dim); line-height: 1.5; padding: 6px 0; }
   .error { color: var(--vscode-errorForeground); margin: 6px 0; }
+  .storage-warning { margin: 6px 0 10px; padding: 7px 8px; border-left: 2px solid var(--vscode-inputValidation-warningBorder); color: var(--dim); font-size: 0.85em; line-height: 1.4; }
   .link { background: none; border: 0; padding: 0; color: var(--vscode-textLink-foreground); cursor: pointer; font: inherit; font-size: 0.85em; }
 </style>
 </head>
@@ -632,6 +637,7 @@ function render() {
     }).join('') + '</div><span class="spacer"></span>' +
     (model.loading ? '<span class="stat-sub">Updating\u2026</span>' : '') + '</div>';
   if (model.error) html += '<div class="error">' + esc(model.error) + '</div>';
+  (model.storage || []).forEach(function (message) { html += '<div class="storage-warning" role="alert">' + esc(message) + '</div>'; });
   const summary = model.summary;
   if (!summary) {
     html += model.firstScan

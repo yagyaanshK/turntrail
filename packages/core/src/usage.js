@@ -6,6 +6,7 @@ import { accountsRoot, listAccounts } from './accounts/store.js';
 import { claudeHome, defaultClaudeHome } from './accounts/claude.js';
 import { codexHome, defaultCodexHome } from './accounts/codex.js';
 import { readCodexThreadNames } from './adapters/codex-index.js';
+import { checkCodexStorage } from './adapters/codex-storage.js';
 
 // Token use, read from the transcripts the agents already write.
 //
@@ -54,6 +55,15 @@ export async function usageLocations(options = {}) {
     }
   }
   return locations;
+}
+
+// Codex chats the scan cannot read, for every Codex home it covers. Their
+// tokens are missing from the totals, which should be said rather than shown
+// as a smaller number.
+export async function usageStorageProblems(options = {}) {
+  const locations = options.locations || (await usageLocations(options));
+  const homes = [...new Set(locations.filter((location) => location.agent === 'codex').map((location) => path.dirname(location.dir)))];
+  return checkCodexStorage({ ...options, homes });
 }
 
 function emptyIndex() {

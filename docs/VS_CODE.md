@@ -123,6 +123,15 @@ responsive; a long history takes about a minute. An index of hourly totals is ke
 `~/.turntrail/usage/`, so later reads cover only lines appended since, and while the panel is open
 it updates a few seconds after an agent writes.
 
+Codex owns its transcript format and has been reshaping how it stores chats. If it ever keeps some
+in a form Turntrail cannot read, they are not quietly left out: **Usage Statistics**, the
+**Sessions** list and `turntrail usage` say how many Codex chats are affected and why. That is a
+rollout in another file format (for example compressed), a rollout that does not start with
+Codex's session record, or a chat in Codex's own `state_*.sqlite` index with no rollout file. The
+checks read only the first bytes of each file, and the index check skips chats Codex has not
+written to yet. It needs Node's built-in SQLite, which current editors include; elsewhere the file
+checks still run.
+
 ### Status Bar
 
 The status bar shows the account in use and its remaining quota for the agent you are working

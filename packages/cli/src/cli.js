@@ -24,6 +24,7 @@ import {
   estimateUsageCost,
   scanUsage,
   summarizeUsage,
+  usageStorageProblems,
   resolveLedger,
   defaultCodexHome
 } from '@turntrail/core';
@@ -215,17 +216,19 @@ export async function runCli(argv, io = process, dependencies = {}) {
     if (days !== 'max' && (!Number.isFinite(days) || days < 1)) throw new Error('--days must be a positive number or max.');
     const index = await scanUsage();
     const summary = summarizeUsage(index, { days, top: 20 });
+    const storage = await usageStorageProblems().catch(() => []);
     let cost;
     if (flags.prices) {
       const prices = JSON.parse(await fs.promises.readFile(path.resolve(cwd, String(flags.prices)), 'utf8'));
       cost = estimateUsageCost(summary.byModel, prices);
     }
     if (flags.json) {
-      io.stdout.write(`${JSON.stringify({ ...summary, cost }, null, 2)}
+      io.stdout.write(`${JSON.stringify({ ...summary, cost, storage }, null, 2)}
 `);
       return;
     }
     io.stdout.write(renderUsage(summary, String(flags.by || 'agent'), cost));
+    for (const problem of storage) io.stdout.write(`Warning: ${problem.message}\n`);
     return;
   }
 

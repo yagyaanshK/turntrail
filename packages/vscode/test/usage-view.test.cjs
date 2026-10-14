@@ -49,7 +49,8 @@ test('the store draws from the saved index, then brings it up to date', async ()
   const store = new UsageStore(async () => ({
     readUsageIndex: async () => index,
     summarizeUsage: (got, options) => ({ ...summary(options.days), from: got }),
-    estimateUsageCost: () => ({ total: 12.5, priced: 1, unpriced: [] })
+    estimateUsageCost: () => ({ total: 12.5, priced: 1, unpriced: [] }),
+    usageStorageProblems: async () => [{ reason: 'format', count: 2, message: '2 Codex chats are stored in a format Turntrail cannot read yet.' }]
   }), {
     runScan: async () => { scans++; },
     getLimits: async () => [{ agent: 'codex', account: 'Studio', window: 'weekly', usedPercent: 51 }],
@@ -64,6 +65,10 @@ test('the store draws from the saved index, then brings it up to date', async ()
 
   await Promise.all([store.refresh(), store.refresh()]);
   assert.equal(scans, 1, 'a refresh during a refresh waits for it');
+  const scanned = await store.viewModel();
+  assert.equal(scanned.error, undefined);
+  assert.deepEqual(scanned.storage, ['2 Codex chats are stored in a format Turntrail cannot read yet.'],
+    'chats the scan cannot read are named rather than left out of the totals quietly');
   store.setDays(90);
   assert.equal((await store.viewModel()).days, 90);
   store.setDays(12);

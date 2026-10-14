@@ -275,6 +275,8 @@ The **Usage Statistics** panel leads with that total and its parts, points out w
 the last week with something to do about it, and keeps the details (usage over time by agent or
 model, limits at the current pace, the heaviest recent sessions, and breakdowns by agent, model,
 project and account) in sections that open on demand. `turntrail usage` prints the same figures.
+If Codex stores some chats in a form Turntrail cannot read, the panel, the Sessions list and the CLI
+say how many and why instead of quietly leaving them out.
 See [VS Code](docs/VS_CODE.md#the-usage-statistics-panel) and [CLI](docs/CLI.md#usage).
 
 ## Multiple accounts

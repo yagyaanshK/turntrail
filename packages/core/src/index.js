@@ -7,6 +7,7 @@ export {
   NATIVE_SESSION_PROVIDERS
 } from './session-index.js';
 export { collapseCodexStreamDuplicates } from './adapters/codex.js';
+export { checkCodexStorage } from './adapters/codex-storage.js';
 export {
   exportHandoff,
   inspectHandoff,
@@ -225,6 +226,7 @@ export {
   usageInsights,
   usageIndexPath,
   usageLocations,
+  usageStorageProblems,
   DEFAULT_USAGE_DAYS,
   USAGE_AGENTS
 } from './usage.js';

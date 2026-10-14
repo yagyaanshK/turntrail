@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
+import { checkCodexStorage } from './adapters/codex-storage.js';
 import { discoverNativeSessions, normalizeNativeProvider } from './adapters/index.js';
 import { normalizePath } from './adapters/common.js';
 import { readManifest } from './store.js';
@@ -63,6 +65,11 @@ export async function listSessionIndex(root, options = {}) {
     }
   }));
 
+  // Chats Codex has but Turntrail cannot read would otherwise just be absent.
+  if (providers.includes('codex')) {
+    errors.push(...(await codexStorageProblems(options)));
+  }
+
   let manifest = { sessions: [] };
   try {
     manifest = await readManifest(root);
@@ -79,6 +86,23 @@ export async function listSessionIndex(root, options = {}) {
     }),
     errors
   };
+}
+
+async function codexStorageProblems(options) {
+  const discoveryOptions = options.discoveryOptions?.codex || {};
+  const locations = [discoveryOptions, ...(discoveryOptions.additionalLocations || [])];
+  const homes = locations
+    .map((location) => location?.sessionsDir)
+    .filter((dir) => typeof dir === 'string' && dir)
+    .map((dir) => path.dirname(dir));
+  // The stock home is what discovery reads when no sessions folder is named.
+  const stock = typeof discoveryOptions.sessionsDir === 'string' && discoveryOptions.sessionsDir;
+  try {
+    const problems = await checkCodexStorage(stock ? { homes } : { extraHomes: homes });
+    return problems.map((problem) => ({ provider: 'codex', message: problem.message }));
+  } catch {
+    return [];
+  }
 }
 
 export async function mergeSessionIndex(nativeByProvider, manifest, options = {}) {

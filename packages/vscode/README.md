@@ -82,7 +82,8 @@ something to do about it. Usage over time by agent or model, when each account's
 at the current pace, the chats that cost most to continue, and breakdowns by model, project and
 account sit in sections that open on demand. The range goes up to **Max**, everything recorded.
 Nothing is sent anywhere. The first open reads your history once in the background; after that only
-new lines are read.
+new lines are read. If Codex ever stores chats in a form Turntrail cannot read, this panel and the
+Sessions list say how many, rather than quietly leaving them out.
 
 ## Commands
 
