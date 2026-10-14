@@ -77,7 +77,18 @@ Claude Code:
 ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
 ~/.claude/projects/<encoded-project-path>/<session-id>/subagents/agent-<agent-id>.jsonl
 ~/.claude/projects/<encoded-project-path>/<session-id>/subagents/agent-<agent-id>.meta.json
+~/.claude/projects/<encoded-project-path>/agent-<agent-id>.jsonl          (2.0-era builds)
 ```
+
+A session is named the way Claude Code's own resume list names it: the name the user gave it
+(`custom-title`, from `/rename`, the editor's Rename, or a handoff), else the title Claude generated
+(`ai-title`), the latest of each since both change and are re-appended; builds from before generated
+titles named a session by a `summary` record, used last and skipped when it is an error message.
+Names are read from the start of the transcript and its last 64 KB, which is where Claude Code keeps
+a current name. Subagents have been recorded three ways: in `<session-id>/subagents/` now, as
+`agent-*.jsonl` beside the parent in 2.0-era builds, and before that inside the parent transcript
+with `isSidechain: true`. All three are treated as the parent's subagents, never as chats or
+requests of their own; `packages/core/test/claude-eras.test.js` holds a fixture for each.
 
 Each agent the `Agent` tool launches is recorded in its own file beside the parent. Every line of it
 carries `isSidechain: true`, the `agentId` and the parent's `sessionId`; the meta file holds the

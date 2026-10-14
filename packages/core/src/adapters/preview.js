@@ -19,6 +19,7 @@ const REQUEST_MARKERS = [/##\s*My request for Codex:\s*/i, /##\s*My request:\s*/
 const INJECTED_BLOCKS = [
   /<system-reminder>[\s\S]*?<\/system-reminder>/gi,
   /<ide_selection>[\s\S]*?<\/ide_selection>/gi,
+  /<ide_opened_file>[\s\S]*?<\/ide_opened_file>/gi,
   /<environment_context>[\s\S]*?<\/environment_context>/gi,
   /<user_instructions>[\s\S]*?<\/user_instructions>/gi,
   /<skills_instructions>[\s\S]*?<\/skills_instructions>/gi,

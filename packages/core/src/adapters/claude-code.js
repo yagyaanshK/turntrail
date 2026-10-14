@@ -30,7 +30,9 @@ export const CLAUDE_PROVIDER = 'anthropic';
 // Every line of a subagent file carries `isSidechain: true`, its `agentId` and
 // the parent's `sessionId`. The meta file names the agent the way the Agent
 // map does. Context compaction reuses the layout with `acompact-` ids and no
-// meta file.
+// meta file. Older builds put agent-<agent-id>.jsonl beside the parent
+// transcript instead, and older still wrote the subagent's lines into the
+// parent transcript itself, marked `isSidechain`.
 const SUBAGENTS_DIR = 'subagents';
 const SUBAGENT_FILE = /^agent-(.+)$/;
 
@@ -55,10 +57,12 @@ export async function discoverClaudeSessions(options = {}) {
       if (agentId && !options.includeSubagents && !options.path) continue;
 
       const { meta, matchesProject, latest } = await cachedDiscovery(options, file, root, async () => {
-        const meta = await inspectClaudeFile(file.path, options);
+        const meta = await inspectClaudeFile(file.path, options, Boolean(agentId));
         const matchesProject = meta.cwd ? await pathsOverlap(meta.cwd, root) : false;
         // Only sessions that could be offered as a choice get the extra tail read.
-        const latest = matchesProject ? (await latestClaudeRequest(file.path, options)) || meta.last : undefined;
+        const latest = matchesProject
+          ? (await latestClaudeRequest(file.path, options, Boolean(agentId))) || meta.last
+          : undefined;
         return { meta, matchesProject, latest };
       });
       if (!options.all && !matchesProject) continue;
@@ -127,6 +131,10 @@ export async function importClaudeSession(root, session, options = {}) {
 }
 
 export function claudeEventToTurn(event, session, lineNumber, extra = {}) {
+  // A subagent's conversation inside the parent transcript, as builds before
+  // separate subagent files wrote it. Its report still arrives as the launching
+  // tool's result, which is what the parent's reader needs.
+  if (event?.isSidechain && !session.subagent) return null;
   const role = claudeRole(event);
   const content = claudeContent(event);
   if (!content.trim()) return null;
@@ -262,14 +270,15 @@ async function spliceSubagents(turns, launches, session, options) {
 // parent: by default a single turn carrying the agent's final report, or the
 // whole recording when the caller asked for subagent transcripts.
 async function readSubagent(session, launch, options) {
-  const filePath = subagentPath(session, launch.agentId);
-  let stat;
-  try {
-    stat = await fs.stat(filePath);
-  } catch {
-    return [];
+  let filePath;
+  for (const candidate of subagentPaths(session, launch.agentId)) {
+    const stat = await fs.stat(candidate).catch(() => undefined);
+    if (stat?.isFile()) {
+      filePath = candidate;
+      break;
+    }
   }
-  if (!stat.isFile()) return [];
+  if (!filePath) return [];
 
   const agent = await describeSubagent(filePath, launch.agentId, {
     recordedSessionId: session.subagent ? session.parentSessionId : session.sessionId
@@ -370,26 +379,31 @@ function assistantText(event) {
     .trim();
 }
 
+// Session transcripts are named by their UUID, so an `agent-` file is always a
+// subagent, wherever it sits: in <session>/subagents/ on current builds, or
+// beside the parent transcript in the project folder on 2.0-era builds.
 function subagentFileId(filePath) {
-  const match = SUBAGENT_FILE.exec(path.basename(filePath, '.jsonl'));
-  if (!match) return undefined;
-  if (path.basename(path.dirname(filePath)) !== SUBAGENTS_DIR) return undefined;
-  return match[1];
+  return SUBAGENT_FILE.exec(path.basename(filePath, '.jsonl'))?.[1];
 }
 
-// Agents launched by an agent are recorded in the same folder as their parent.
-function subagentPath(session, agentId) {
-  const dir = session.subagent
-    ? path.dirname(session.path)
-    : path.join(path.dirname(session.path), path.basename(session.path, '.jsonl'), SUBAGENTS_DIR);
-  return path.join(dir, `agent-${agentId}.jsonl`);
+// Where a launched agent's recording can be, newest layout first. Agents
+// launched by an agent are recorded in the same folder as their parent.
+function subagentPaths(session, agentId) {
+  const name = `agent-${agentId}.jsonl`;
+  if (session.subagent) return [path.join(path.dirname(session.path), name)];
+  return [
+    path.join(path.dirname(session.path), path.basename(session.path, '.jsonl'), SUBAGENTS_DIR, name),
+    path.join(path.dirname(session.path), name)
+  ];
 }
 
 // What the Agent map shows for a subagent: the description its parent gave it
 // and the agent type. Both live in the meta file; the transcript itself only
 // says which parent it belongs to.
 async function describeSubagent(filePath, agentId, meta) {
-  const parentSessionId = meta.recordedSessionId || path.basename(path.dirname(path.dirname(filePath)));
+  // The folder names the parent only in the current layout.
+  const nested = path.basename(path.dirname(filePath)) === SUBAGENTS_DIR;
+  const parentSessionId = meta.recordedSessionId || (nested ? path.basename(path.dirname(path.dirname(filePath))) : 'unknown');
   let description;
   let agentType;
   try {
@@ -411,39 +425,68 @@ async function describeSubagent(filePath, agentId, meta) {
   };
 }
 
-async function inspectClaudeFile(filePath, options) {
+async function inspectClaudeFile(filePath, options, subagent = false) {
   const objects = await readFirstJsonlObjects(filePath, 80, options);
   let cwd;
   let sessionId;
-  let title;
-  const messages = [];
 
   for (const event of objects) {
     cwd ||= event.cwd;
     sessionId ||= event.sessionId;
-    // Claude Code names most sessions itself. That is a real chat name and
-    // beats anything derived from the transcript.
-    title ||= event.aiTitle;
-    if (event.type === 'user') messages.push(claudeMessageText(event));
   }
+  // A name set or changed later is re-appended near the end of the file, which
+  // is where Claude Code's own resume list reads it.
+  const tail = await readLastJsonlObjects(filePath, 400, TITLE_TAIL_BYTES, options).catch(() => []);
 
   return {
     cwd,
     sessionId: sessionId || path.basename(filePath, '.jsonl'),
     // The id the transcript itself records, absent when it records none.
     recordedSessionId: sessionId,
-    title,
+    title: claudeTitle([...objects, ...tail]),
     // Only used when the session has no name of its own.
-    ...describeRequests(messages)
+    ...describeRequests(claudeRequestTexts(objects, subagent))
   };
 }
 
-function latestClaudeRequest(filePath, options) {
-  return readLatestRequest(
-    filePath,
-    (objects) => objects.filter((event) => event.type === 'user').map(claudeMessageText),
-    options
-  );
+// What Claude Code shows as a session's name, in its own order of preference:
+// the name the user gave it (/rename, the editor's Rename, or the name a
+// handoff asks for), then the title Claude generated, the latest of each since
+// both change during a session. Builds from before generated titles named a
+// session by the summary written for /resume, so that comes last; a summary
+// that is an error message names nothing.
+const TITLE_TAIL_BYTES = 64 * 1024;
+
+function claudeTitle(objects) {
+  let custom;
+  let generated;
+  let summary;
+  for (const event of objects) {
+    if (event?.type === 'custom-title' && typeof event.customTitle === 'string' && event.customTitle.trim()) {
+      custom = event.customTitle.trim();
+    }
+    if (typeof event?.aiTitle === 'string' && event.aiTitle.trim()) generated = event.aiTitle.trim();
+    if (event?.type === 'summary' && !summary && usableSummary(event.summary)) summary = event.summary.trim();
+  }
+  return custom || generated || summary;
+}
+
+function usableSummary(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text.length > 0 && text.length <= 300 && !/^(?:API Error|Error)\b/i.test(text);
+}
+
+// What the user asked. Builds from before subagents had their own files wrote
+// a subagent's conversation into the parent transcript, marked `isSidechain`;
+// those are the agent's instructions, not the user's requests.
+function claudeRequestTexts(objects, subagent = false) {
+  return objects
+    .filter((event) => event.type === 'user' && (subagent || !event.isSidechain))
+    .map(claudeMessageText);
+}
+
+function latestClaudeRequest(filePath, options, subagent = false) {
+  return readLatestRequest(filePath, (objects) => claudeRequestTexts(objects, subagent), options);
 }
 
 function claudeMessageText(event) {
