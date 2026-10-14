@@ -1,11 +1,11 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createTurn } from '../schema.js';
 import { writeSession } from '../store.js';
 import {
   createBoundedTurnCollector,
   homePath,
-  jsonlFileInfo,
-  listJsonlFiles,
+  listSessionFiles,
   oversizedLineSummary,
   pathsOverlap,
   cachedDiscovery,
@@ -13,7 +13,8 @@ import {
   readFirstJsonlObjects,
   readJsonlObjects,
   readLastJsonlObjects,
-  reportDiscoveryError
+  reportDiscoveryError,
+  sessionFileInfo
 } from './common.js';
 import { readCodexThreadNames } from './codex-index.js';
 import { describeRequests, readLatestRequest } from './preview.js';
@@ -39,22 +40,15 @@ export async function discoverCodexSessions(options = {}) {
   const root = options.root || process.cwd();
   const sessionsDir = options.sessionsDir || homePath('.codex', 'sessions');
   const archivedDir = options.archivedDir || homePath('.codex', 'archived_sessions');
+  const list = (dir) => listCodexRollouts(dir, {
+    signal: options.signal,
+    maxFiles: options.maxDiscoveryFiles,
+    maxEntries: options.maxDiscoveryEntries
+  });
   const files = options.path
-    ? [await jsonlFileInfo(options.path)]
-    : [
-        ...(await listJsonlFiles(sessionsDir, {
-          signal: options.signal,
-          maxFiles: options.maxDiscoveryFiles,
-          maxEntries: options.maxDiscoveryEntries
-        })),
-        ...(options.includeArchived
-          ? await listJsonlFiles(archivedDir, {
-              signal: options.signal,
-              maxFiles: options.maxDiscoveryFiles,
-              maxEntries: options.maxDiscoveryEntries
-            })
-          : [])
-      ].sort((a, b) => b.mtimeMs - a.mtimeMs);
+    ? [await sessionFileInfo(options.path, ROLLOUT_EXTENSIONS)]
+    : [...(await list(sessionsDir)), ...(options.includeArchived ? await list(archivedDir) : [])]
+        .sort((a, b) => b.mtimeMs - a.mtimeMs);
   // Read once for the whole scan: it is one small file keyed by thread id, and
   // every session below asks it the same question.
   const names = await readCodexThreadNames(options);
@@ -109,10 +103,16 @@ export async function discoverCodexSessions(options = {}) {
 
 export async function importCodexSession(root, session, options = {}) {
   const collector = createBoundedTurnCollector(options);
-  await readJsonlObjects(session.path, (event, lineNumber) => {
-    const turn = codexEventToTurn(event, session, lineNumber);
-    collector.push(turn);
-  }, { ...options, lineFilter: codexLineWanted });
+  if (isJsonRollout(session.path)) {
+    (await readJsonRollout(session.path, options)).forEach((event, index) => {
+      collector.push(codexEventToTurn(event, session, index + 1));
+    });
+  } else {
+    await readJsonlObjects(session.path, (event, lineNumber) => {
+      const turn = codexEventToTurn(event, session, lineNumber);
+      collector.push(turn);
+    }, { ...options, lineFilter: codexLineWanted });
+  }
   const { turns } = collector;
   if (turns.length === 0) throw new Error(`No importable Codex turns found in ${session.path}`);
   const collapsed = collapseCodexStreamDuplicates(turns);
@@ -145,7 +145,8 @@ export function codexLineWanted(line) {
   return !(CODEX_UNUSED_RECORD.test(head) || CODEX_UNUSED_EVENT.test(head) || CODEX_UNUSED_ITEM.test(head));
 }
 
-export function codexEventToTurn(event, session, lineNumber) {
+export function codexEventToTurn(record, session, lineNumber) {
+  const event = normalizeCodexRecord(record);
   const mapped = codexEventContent(event);
   if (!mapped || !mapped.content.trim()) return null;
 
@@ -174,6 +175,70 @@ export function codexEventToTurn(event, session, lineNumber) {
   );
 }
 
+// Codex has written three layouts, and a session resumed after an upgrade can
+// hold two of them. Each record is translated to the current one here, so the
+// rest of the adapter reads a single shape whichever Codex wrote it:
+//
+// - Codex 0.31 and later wrap every record: {timestamp, type, payload}, with
+//   `session_meta`, `response_item` and `event_msg` among the types. 2026
+//   builds add an `ordinal` and stop writing `event_msg/user_message`.
+// - Codex 0.2 to 0.30 (Rust, mid-2025) wrote JSONL with a bare first line
+//   {id, timestamp, instructions, git?}, then bare response items such as
+//   {type: "message", role, content}, and {record_type: "state"} snapshots.
+// - The TypeScript CLI (April to August 2025) wrote one JSON document per
+//   session, rollout-<date>-<id>.json: {session: {timestamp, id,
+//   instructions}, items: [response items]}. See readJsonRollout.
+//
+// The layouts are taken from Codex's own rollout writers at those releases.
+const CODEX_ITEM_TYPES = new Set([
+  'message',
+  'reasoning',
+  'function_call',
+  'function_call_output',
+  'custom_tool_call',
+  'custom_tool_call_output',
+  'local_shell_call',
+  'web_search_call'
+]);
+
+export function normalizeCodexRecord(record) {
+  if (!record || typeof record !== 'object' || record.payload !== undefined) return record;
+  if (record.record_type !== undefined) return { type: 'legacy_state' };
+  if (record.type === undefined && typeof record.id === 'string' && typeof record.timestamp === 'string') {
+    return { timestamp: record.timestamp, type: 'session_meta', payload: { ...record } };
+  }
+  if (CODEX_ITEM_TYPES.has(record.type)) return { type: 'response_item', payload: record };
+  return record;
+}
+
+const ROLLOUT_EXTENSIONS = ['.jsonl', '.json'];
+const MAX_JSON_ROLLOUT_BYTES = 256 * 1024 * 1024;
+
+function isJsonRollout(filePath) {
+  return path.extname(filePath).toLowerCase() === '.json';
+}
+
+// Every rollout under a folder: JSONL from the Rust CLI, and the TypeScript
+// CLI's .json documents, which are named rollout-*.json. Other .json files in
+// the tree are not sessions.
+async function listCodexRollouts(dir, options) {
+  const files = await listSessionFiles(dir, { ...options, extensions: ROLLOUT_EXTENSIONS });
+  return files.filter((file) => !isJsonRollout(file.path) || /^rollout-/i.test(path.basename(file.path)));
+}
+
+// The TypeScript CLI's one-document rollout, as the records a JSONL rollout of
+// the same session would hold.
+async function readJsonRollout(filePath, options = {}) {
+  const stat = await fs.stat(filePath);
+  const limit = options.maxJsonRolloutBytes || MAX_JSON_ROLLOUT_BYTES;
+  if (stat.size > limit) throw new Error(`Codex rollout is larger than ${limit} bytes: ${filePath}`);
+  const document = JSON.parse(await fs.readFile(filePath, 'utf8'));
+  const session = document?.session || {};
+  const items = Array.isArray(document?.items) ? document.items : [];
+  const meta = { timestamp: session.timestamp, type: 'session_meta', payload: { ...session } };
+  return [meta, ...items.map((item) => normalizeCodexRecord(item))];
+}
+
 function codexEventContent(event) {
   const payload = event.payload || {};
 
@@ -197,6 +262,13 @@ function codexEventContent(event) {
 
   if (event.type === 'response_item' && payload.type === 'function_call') {
     return { role: 'tool', content: `Tool call: ${payload.name}\n${contentToText(payload.arguments)}`, stream: ITEM_STREAM };
+  }
+
+  // Codex before the shell became a function call ran it through its own item.
+  if (event.type === 'response_item' && payload.type === 'local_shell_call') {
+    const command = payload.action?.command;
+    const text = Array.isArray(command) ? command.join(' ') : contentToText(payload.action || payload);
+    return { role: 'tool', content: `Tool call: shell\n${text}`, stream: ITEM_STREAM };
   }
 
   if (event.type === 'response_item' && payload.type === 'function_call_output') {
@@ -428,7 +500,9 @@ export function codexSurface(source, originator) {
 async function inspectCodexFile(filePath, options) {
   // Wide enough to get past the injected preamble - skills, instructions, world
   // state - to the first message the user actually typed.
-  const objects = await readFirstJsonlObjects(filePath, 80, options);
+  const objects = isJsonRollout(filePath)
+    ? (await readJsonRollout(filePath, options)).slice(0, 80)
+    : (await readFirstJsonlObjects(filePath, 80, options)).map(normalizeCodexRecord);
   let sessionId;
   let cwd;
   let source;
@@ -445,7 +519,9 @@ async function inspectCodexFile(filePath, options) {
 
   return {
     sessionId,
-    cwd,
+    // Codex before 0.31 recorded no folder in its session metadata, only in the
+    // environment block it sends the model.
+    cwd: cwd || environmentCwd(objects),
     source,
     forkedFrom,
     ...describeRequests(codexRequestTexts(objects))
@@ -454,36 +530,55 @@ async function inspectCodexFile(filePath, options) {
 
 // What the user asked, in order. Codex used to record each message twice: as
 // sent (`event_msg/user_message`) and as the model saw it (`response_item`).
-// One is enough, and the event is the cleaner of the two. Builds from 2026 write
-// only the response item, with the injected AGENTS.md and environment blocks as
-// separate text parts beside the request, so each part is offered on its own
-// and the injected ones are recognised and dropped downstream.
-function codexRequestTexts(objects) {
-  const sent = objects
-    .filter((event) => event.type === 'event_msg' && event.payload?.type === 'user_message')
-    .map((event) => contentToText(event.payload.message));
-  if (sent.length > 0) return sent;
+// The event is the cleaner copy, so up to the last one present the items are
+// skipped as duplicates. After it - all of a file from builds that no longer
+// write the event, or the part of a session resumed after such an upgrade - the
+// items are read, one text part at a time so the injected AGENTS.md and
+// environment blocks beside a request are recognised and dropped downstream.
+function codexRequestTexts(records) {
+  const objects = records.map(normalizeCodexRecord);
+  const isSent = (event) => event?.type === 'event_msg' && event.payload?.type === 'user_message';
+  let lastSent = -1;
+  objects.forEach((event, index) => {
+    if (isSent(event)) lastSent = index;
+  });
 
   const texts = [];
-  for (const event of objects) {
-    const payload = event.payload;
-    if (event.type !== 'response_item' || payload?.type !== 'message' || payload.role !== 'user') continue;
+  objects.forEach((event, index) => {
+    if (isSent(event)) {
+      texts.push(contentToText(event.payload.message));
+      return;
+    }
+    const payload = event?.payload;
+    if (index < lastSent || event?.type !== 'response_item' || payload?.type !== 'message' || payload.role !== 'user') return;
     for (const part of Array.isArray(payload.content) ? payload.content : [payload.content]) {
       if (isImagePart(part) || isFilePart(part)) continue;
       const text = contentToText(part);
       if (text.trim()) texts.push(text);
     }
-  }
+  });
   return texts;
+}
+
+function environmentCwd(objects) {
+  for (const text of codexRequestTexts(objects)) {
+    const match = /<environment_context>[\s\S]*?<cwd>([^<]+)<\/cwd>/.exec(text);
+    if (match) return match[1].trim();
+  }
+  return undefined;
 }
 
 // The most recent request in a session, read from the tail so a 400 MB
 // transcript costs the same as a small one.
-function latestCodexRequest(filePath, options) {
+async function latestCodexRequest(filePath, options) {
+  if (isJsonRollout(filePath)) {
+    const described = describeRequests(codexRequestTexts(await readJsonRollout(filePath, options)), options);
+    return described.last || described.first;
+  }
   return readLatestRequest(filePath, codexRequestTexts, options);
 }
 
 function sessionIdFromCodexPath(filePath) {
-  const base = path.basename(filePath, '.jsonl');
+  const base = path.basename(filePath).replace(/\.jsonl?$/i, '');
   return base.replace(/^rollout-/, '');
 }

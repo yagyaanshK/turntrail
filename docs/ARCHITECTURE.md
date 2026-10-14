@@ -96,7 +96,23 @@ Codex:
 ```text
 ~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl
 ~/.codex/archived_sessions/rollout-*.jsonl
+~/.codex/sessions/rollout-<date>-<id>.json      (TypeScript CLI, 2025)
 ```
+
+Turntrail reads whichever Codex wrote the file, because users upgrade at their own pace and a
+session resumed after an upgrade holds two layouts. Each record is translated to the current
+layout in one place (`normalizeCodexRecord`), following Codex's own rollout writers:
+
+| Codex | Layout |
+|---|---|
+| TypeScript CLI, April to August 2025 | One JSON document per session: `{session: {timestamp, id, instructions}, items: [response items]}`. No folder is recorded, so these sessions are listed under all projects. |
+| Rust 0.2 to 0.30 | JSONL: a bare `{id, timestamp, instructions, git}` line, bare response items, `{record_type: "state"}` snapshots. The folder comes from the `<environment_context>` the model was sent. |
+| Rust 0.31 to 2025 | JSONL with every record wrapped as `{timestamp, type, payload}`; each request appears as both `event_msg/user_message` and a `response_item`. |
+| 2026 builds | As above with an `ordinal` per record, `token_usage_record`, `world_state` and `item_completed`, and no `event_msg/user_message`: requests exist only as response items. |
+
+Requests are read from the `user_message` events up to the last one in a file and from response
+items after it, which covers all four and the boundary in a resumed session. Each layout has a
+fixture in `packages/core/test/codex-eras.test.js`; a new Codex layout gets one too.
 
 Codex names its threads but keeps the name out of the transcript, in an append-only index read
 alongside the rollout files and joined on the thread id:
@@ -109,6 +125,9 @@ Codex mirrors these names into a `threads` table in `~/.codex/state_5.sqlite`, w
 not read. Measured against a real install of 64 threads, the table named nothing the index had not
 already named and its `name` column was empty throughout, so reading it would buy a SQLite
 dependency, locked-database handling and exposure to the drift between the two stores for nothing.
+The one exception is the storage check (`checkCodexStorage`): it opens the table read-only through
+Node's built-in `node:sqlite`, when the runtime has it, only to find threads Codex lists that have
+no rollout file. Anything it cannot read there is treated as proving nothing.
 
 Gemini CLI:
 

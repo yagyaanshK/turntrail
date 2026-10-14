@@ -5,8 +5,8 @@ import { homePath } from './common.js';
 
 // Codex chats that exist but that Turntrail cannot read.
 //
-// Turntrail reads Codex's plain JSONL rollouts. Codex owns that format and has
-// been reshaping its storage (a SQLite thread index beside the rollouts, a
+// Turntrail reads every rollout layout Codex has written so far (see
+// normalizeCodexRecord). Codex owns that format and has been reshaping its storage (a SQLite thread index beside the rollouts, a
 // "paginated" rollout migration, and announced cuts to what it keeps on disk).
 // Should a build compress rollouts or keep chats only in its database, those
 // chats would silently drop out of Sessions and Usage. This makes that loud.
@@ -21,8 +21,9 @@ export async function checkCodexStorage(options = {}) {
   for (const home of homes) {
     for (const dir of ['sessions', 'archived_sessions']) {
       for (const file of await rolloutFiles(path.join(home, dir))) {
-        if (!file.toLowerCase().endsWith('.jsonl')) problems.format.push(file);
-        else if (!(await startsWithSessionMeta(file))) problems.unrecognised.push(file);
+        const kind = path.extname(file).toLowerCase();
+        if (kind !== '.jsonl' && kind !== '.json') problems.format.push(file);
+        else if (!(await startsLikeRollout(file, kind))) problems.unrecognised.push(file);
       }
     }
     problems.missing.push(...(await threadsWithoutRollout(home, options)));
@@ -73,7 +74,15 @@ async function rolloutFiles(dir) {
   return found;
 }
 
-async function startsWithSessionMeta(file) {
+// How each Codex era opens a rollout: 0.31 and later with a wrapped
+// session_meta record, 0.2 to 0.30 with bare {id, timestamp, ...} metadata,
+// and the TypeScript CLI's .json document with its "session" object.
+const ROLLOUT_STARTS = {
+  '.jsonl': [/^\{[^\n]{0,300}?"type":"session_meta"/, /^\{"id":"[^"]+","timestamp":"/],
+  '.json': [/^\{\s*"session"\s*:/]
+};
+
+async function startsLikeRollout(file, kind) {
   let handle;
   try {
     handle = await fs.open(file, 'r');
@@ -81,7 +90,8 @@ async function startsWithSessionMeta(file) {
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     // An empty file is a rollout Codex has not written to yet, not a new format.
     if (bytesRead === 0) return true;
-    return /^\{[^\n]{0,300}?"type":"session_meta"/.test(buffer.subarray(0, bytesRead).toString('utf8'));
+    const head = buffer.subarray(0, bytesRead).toString('utf8');
+    return ROLLOUT_STARTS[kind].some((pattern) => pattern.test(head));
   } catch {
     return true;
   } finally {
