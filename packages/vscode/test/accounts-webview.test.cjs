@@ -103,6 +103,7 @@ test('the accounts panel is told the maintenance state so it can show the switch
   assert.match(view.webview.html, /Sign in again/);
   assert.match(view.webview.html, /USAGE_PERMISSION_DENIED/);
   assert.match(view.webview.html, /Waiting for Claude Code to renew this login/);
+  assert.match(view.webview.html, /'retry', 'Try again'/, 'a verify card offers Try again, not a new sign-in');
   assert.deepEqual(posted.at(-1).model.maintenance, { enabled: false, intervalHours: 5 });
 
   enabled = true;

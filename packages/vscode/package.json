@@ -52,6 +52,7 @@
     "onCommand:turntrail.switchAccount",
     "onCommand:turntrail.refreshAccountQuota",
     "onCommand:turntrail.useCodexReset",
+    "onCommand:turntrail.retryAccountLogin",
     "onCommand:turntrail.discoverClaude",
     "onCommand:turntrail.discoverCodex",
     "onCommand:turntrail.discoverGemini",
@@ -86,6 +87,7 @@
     "onCommand:contextBridge.switchAccount",
     "onCommand:contextBridge.refreshAccountQuota",
     "onCommand:contextBridge.useCodexReset",
+    "onCommand:contextBridge.retryAccountLogin",
     "onCommand:contextBridge.discoverClaude",
     "onCommand:contextBridge.discoverCodex",
     "onCommand:contextBridge.discoverGemini",
@@ -198,6 +200,10 @@
       {
         "command": "turntrail.useCodexReset",
         "title": "Turntrail: Use Codex Banked Reset"
+      },
+      {
+        "command": "turntrail.retryAccountLogin",
+        "title": "Turntrail: Try Account Login Again"
       },
       {
         "command": "turntrail.openAccountTerminal",
@@ -577,6 +583,10 @@
         },
         {
           "command": "turntrail.useCodexReset",
+          "when": "false"
+        },
+        {
+          "command": "turntrail.retryAccountLogin",
           "when": "false"
         },
         {

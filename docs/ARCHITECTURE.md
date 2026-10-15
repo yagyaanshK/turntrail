@@ -494,7 +494,7 @@ An entry still marked started after the lock's stale window is settled as interr
 `refresh_token_expired`, `refresh_token_reused` and `refresh_token_invalidated`, and Claude's
 `invalid_grant`, are kept as the failure's reason so the panel can say why a sign-in is needed. A
 usage `401` on a login whose refresh token is recorded as refused is reported as needing sign-in,
-not verification.
+not verification. [LOGIN_RENEWAL.md](LOGIN_RENEWAL.md) walks through when each path renews.
 The VS Code scheduler is application-scoped, disabled by default, and jittered around a five-hour
 interval; `turntrail account maintain` exposes the same operation to OS schedulers.
 

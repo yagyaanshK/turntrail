@@ -40,8 +40,12 @@ export async function maintainAccounts(options = {}) {
     return await withFileLock(
       accountMaintenanceLockPath(options),
       async () => {
-        const accounts = await listAccounts(options);
-        const claudeAccounts = accounts.filter((account) => account.provider === 'claude');
+        const all = await listAccounts(options);
+        // `accountIds` maintains just those, as a card's "Try again" does.
+        // Which Claude account owns the live login is still worked out from
+        // all of them.
+        const accounts = options.accountIds ? all.filter((account) => options.accountIds.includes(account.id)) : all;
+        const claudeAccounts = all.filter((account) => account.provider === 'claude');
         let observedAgentProcesses = options.agentProcesses;
         let claudeRunning = false;
         let codexRunning = false;

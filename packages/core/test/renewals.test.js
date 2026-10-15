@@ -271,3 +271,38 @@ test('one dead login does not stop maintenance of every account after it', async
   const offline = await getCodexUsage(dead.id, { ...options, offline: true });
   assert.equal(offline.requiresSignIn, true);
 });
+
+test('Try again renews one rejected login and leaves every other account alone', async () => {
+  const options = await sandbox();
+  // Its access token has not expired but is turned away: the "verify" state.
+  // Five days out, beyond the 3-day window in which a limits read renews it anyway.
+  const verify = await codexAccount(options, 'verify', hoursFromNow(120), 'rt.verify');
+  const other = await codexAccount(options, 'other', hoursFromNow(-1), 'rt.other');
+
+  const sent = [];
+  let renewed = false;
+  const fetch = async (url, init) => {
+    if (url.includes('/oauth/token')) {
+      const token = JSON.parse(String(init.body)).refresh_token;
+      sent.push(token);
+      renewed = true;
+      return json(200, {
+        access_token: jwt({ exp: hoursFromNow(240), nonce: 'verify-new' }),
+        refresh_token: 'rt.verify.new',
+        id_token: jwt({ sub: 'verify', email: 'verify@example.com' })
+      });
+    }
+    return renewed ? codexUsage() : json(401, {});
+  };
+
+  const maintenance = await maintainAccounts({ ...options, accountIds: [verify.id], fetch });
+  assert.deepEqual(maintenance.results.map((item) => item.accountId), [verify.id]);
+  assert.equal(maintenance.results[0].status, 'refreshed');
+  assert.equal(maintenance.results[0].revalidated, true);
+  assert.deepEqual(sent, ['rt.verify'], 'the other account, though due, is not touched');
+  assert.equal((await readCodexAuth(codexHome(verify.id, options))).refreshToken, 'rt.verify.new');
+  assert.equal((await readCodexAuth(codexHome(other.id, options))).refreshToken, 'rt.other');
+  const usage = await getCodexUsage(verify.id, { ...options, offline: true });
+  assert.equal(usage.requiresRevalidation, undefined);
+  assert.equal(usage.windows.length > 0, true);
+});

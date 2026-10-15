@@ -320,8 +320,11 @@ unchanged.
 
 Codex activation validates an OAuth account by rotating its refresh token before installing it,
 even if the access-token JWT has not reached its local expiry. This catches credentials revoked by
-OpenAI or renewed elsewhere. A usage-endpoint `401` is shown as a repairable verification state;
-Turntrail offers both **Repair login** and a fresh **Sign in**. Once the provider has refused the
+OpenAI or renewed elsewhere. A usage-endpoint `401` is shown as a verification state with a **Try
+again** button. It runs the one renewal maintenance would, for that account only, through the same
+per-account lock and renewal log. The renewal either brings the login back or turns the card into
+**Sign in again** with the reason. If Codex or Claude is running and using that login, Try again leaves
+it to the client and says so. Once the provider has refused the
 login's refresh token as well, the card says it needs a new sign-in and why: **Login expired**,
 **Login renewed by another copy**, or **Signed out or signed in elsewhere**, following Codex's own
 distinctions. Turntrail does not send that refresh token again. If a fresh sign-in belongs to the

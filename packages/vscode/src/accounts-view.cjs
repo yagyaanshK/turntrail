@@ -407,6 +407,7 @@ class AccountsWebview {
         import: 'turntrail.importAccount',
         refresh: 'turntrail.refreshAccountQuota',
         useReset: 'turntrail.useCodexReset',
+        retry: 'turntrail.retryAccountLogin',
         toggleMaintenance: 'turntrail.toggleAccountMaintenance',
         runMaintenance: 'turntrail.runAccountMaintenance',
         keepClaudeChats: 'turntrail.keepClaudeChats',
@@ -949,7 +950,11 @@ function renderRow(row) {
         (row.signedIn && !row.needsActivation ? 'In use' : 'Selected') + '</span>' : '') +
     '</div>' +
     '<div class="actions">' +
-      (authenticationFailure
+      // A rejected access token may only need renewing; a refused refresh
+      // token needs a new sign-in.
+      (row.requiresRevalidation && !row.requiresSignIn
+        ? act('retry', 'Try again', 'primary')
+        : authenticationFailure
         ? act('signin', 'Sign in again', 'primary')
         : (usageAccessFailure
             ? ''
