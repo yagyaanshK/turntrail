@@ -25,8 +25,18 @@ function loginNeedsUpdate(account, activeId, hasAuthenticationIssue = false) {
     Number.isFinite(signedInAt) && Number.isFinite(lastUsedAt) && signedInAt > lastUsedAt;
 }
 
-function authenticationFailureLabel(code) {
-  if (code === 'AUTH_EXPIRED') return 'Authentication expired (AUTH_EXPIRED)';
+// "Sign in again" when the refresh token itself was refused, saying why where
+// the provider did; "verify" when only an access token was turned away and a
+// renewal may still fix it.
+const SIGN_IN_REASONS = {
+  refresh_token_expired: 'Login expired · sign in again',
+  refresh_token_reused: 'Login renewed by another copy · sign in again',
+  refresh_token_invalidated: 'Signed out or signed in elsewhere · sign in again',
+  invalid_grant: 'Login expired or renewed elsewhere · sign in again'
+};
+
+function authenticationFailureLabel(code, reason) {
+  if (code === 'AUTH_EXPIRED') return SIGN_IN_REASONS[reason] || 'Authentication expired (AUTH_EXPIRED)';
   if (code === 'AUTH_REJECTED') return 'Authentication rejected (AUTH_REJECTED)';
   return undefined;
 }
@@ -67,7 +77,7 @@ class AccountsStore {
       await Promise.all(
         accounts.map(async (account) => {
           try {
-            this.usage.set(account.id, await read(account.id, options));
+            this.usage.set(account.id, await read(account.id, { renewalSource: 'panel', ...options }));
           } catch (error) {
             this.usage.set(account.id, { error: error.message, windows: [] });
           }
@@ -88,7 +98,7 @@ class AccountsStore {
     const { getCodexUsage, getClaudeUsage } = await this.core();
     const read = providerId === 'claude' ? getClaudeUsage : getCodexUsage;
     try {
-      this.usage.set(accountId, await read(accountId, options));
+      this.usage.set(accountId, await read(accountId, { renewalSource: 'panel', ...options }));
     } catch (error) {
       this.usage.set(accountId, { error: error.message, windows: [] });
     }
@@ -123,6 +133,7 @@ class AccountsStore {
       accountId,
       staleReason: failure.message || failure.error,
       authenticationFailure: code,
+      authenticationReason: code === 'AUTH_EXPIRED' ? persisted?.authenticationReason : undefined,
       requiresSignIn: code === 'AUTH_EXPIRED',
       requiresRevalidation: code === 'AUTH_REJECTED'
     });
@@ -216,7 +227,7 @@ class AccountsStore {
       requiresSignIn,
       requiresRevalidation,
       authenticationFailure: usage?.authenticationFailure,
-      authenticationFailureLabel: authenticationFailureLabel(usage?.authenticationFailure),
+      authenticationFailureLabel: authenticationFailureLabel(usage?.authenticationFailure, usage?.authenticationReason),
       usageAccessFailure,
       error: usage?.error === 'not-signed-in' ? undefined : usage?.error,
       limitReached: !hasAuthenticationIssue && !hasUsageAccessIssue && Boolean(usage?.limitReached),

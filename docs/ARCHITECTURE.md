@@ -481,7 +481,20 @@ Due maintenance is deferred without a provider request while Claude is running a
 15 minutes.
 If a quota request returns `401` before the recorded access-token expiry, maintenance performs one
 refresh-and-retry for an inactive account. It may also repair the selected machine-default account
-when no provider process is running; a live owner causes the repair to be deferred.
+when no provider process is running; a live owner causes the repair to be deferred. Each account is
+maintained independently: an account's failure is its result, not the end of the run.
+
+`accounts/renewals.js` is the single path every refresh-token renewal takes, for both providers.
+Under a per-account file lock it re-reads the credential and returns it unchanged if another
+process renewed it meanwhile (or within the last two minutes), refuses without a request if the
+current refresh token is recorded as refused, and otherwise renews with the caller's abort signal
+dropped and a 60-second timeout. Every attempt is journalled in `accounts/<id>/renewals.json` (last
+50) with its outcome and 12-hex-digit SHA-256 fingerprints of the spent and received refresh tokens.
+An entry still marked started after the lock's stale window is settled as interrupted. Codex's
+`refresh_token_expired`, `refresh_token_reused` and `refresh_token_invalidated`, and Claude's
+`invalid_grant`, are kept as the failure's reason so the panel can say why a sign-in is needed. A
+usage `401` on a login whose refresh token is recorded as refused is reported as needing sign-in,
+not verification.
 The VS Code scheduler is application-scoped, disabled by default, and jittered around a five-hour
 interval; `turntrail account maintain` exposes the same operation to OS schedulers.
 

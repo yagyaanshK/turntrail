@@ -7,6 +7,7 @@ import { fetchClaudeProfile, refreshClaudeToken } from './claude-oauth.js';
 import { isProviderContractError, validateClaudeCredentialPayload } from './provider-contracts.js';
 import { assertAgentStopped } from './processes.js';
 import { carryClaudeRetention } from './claude-settings.js';
+import { renewLogin } from './renewals.js';
 
 export const CLAUDE_PROVIDER = 'claude';
 export const CLAUDE_PROACTIVE_REFRESH_MS = 4 * 60 * 60 * 1000;
@@ -378,9 +379,19 @@ export async function maintainIdleClaudeLogin(accountId, options = {}) {
     // narrows the unavoidable gap between OS process inspection and the token
     // request without ever racing a Claude process that is already visible.
     await assertAgentStopped(CLAUDE_PROVIDER, options);
-    const tokens = await refreshClaudeToken(source.refreshToken, options);
-    credential = claudeCredentialWithTokens(credential, tokens);
-    refreshed = true;
+    await renewLogin(accountId, {
+      provider: CLAUDE_PROVIDER,
+      seen: source,
+      read: async () => source,
+      renew: async (current, renewalOptions) => {
+        const tokens = await refreshClaudeToken(current.refreshToken, renewalOptions);
+        credential = claudeCredentialWithTokens(credential, tokens);
+        // Saved before the renewal is recorded as done.
+        await writeClaudeCredentialFile(liveHome, credential);
+        refreshed = true;
+        return tokens;
+      }
+    }, options);
   }
 
   const repaired = !live;
@@ -649,17 +660,24 @@ export async function ensureClaudeAccessToken(accountId, options = {}) {
   if ((fresh && !options.forceRefresh) || options.offline) return auth;
   if (!auth.refreshToken) return auth;
 
-  const tokens = await refreshClaudeToken(auth.refreshToken, options);
-  // A refresh returns no profile, so keep the one already on disk rather than
-  // wiping the account's identity every eight hours.
-  const profile = await readClaudeProfile(claudeHome(accountId, options), options);
-  await writeClaudeCredential(
-    accountId,
-    tokens,
-    profile ? { ...profile, plan: auth.plan, organizationRateLimitTier: auth.rateLimitTier } : undefined,
-    options
-  );
-  return readClaudeAuth(claudeHome(accountId, options), options);
+  return renewLogin(accountId, {
+    provider: CLAUDE_PROVIDER,
+    seen: auth,
+    read: () => readClaudeAuth(claudeHome(accountId, options), options),
+    renew: async (current, renewalOptions) => {
+      const tokens = await refreshClaudeToken(current.refreshToken, renewalOptions);
+      // A refresh returns no profile, so keep the one already on disk rather
+      // than wiping the account's identity every eight hours.
+      const profile = await readClaudeProfile(claudeHome(accountId, options), options);
+      await writeClaudeCredential(
+        accountId,
+        tokens,
+        profile ? { ...profile, plan: current.plan, organizationRateLimitTier: current.rateLimitTier } : undefined,
+        options
+      );
+      return readClaudeAuth(claudeHome(accountId, options), options);
+    }
+  }, options);
 }
 
 // Fill in an account's identity from the API when the credential arrived

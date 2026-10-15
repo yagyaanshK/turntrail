@@ -195,6 +195,7 @@ export {
   DEFAULT_ACCOUNT_MAINTENANCE_LOCK_STALE_MS,
   DEFAULT_ACCOUNT_MAINTENANCE_LOCK_TIMEOUT_MS
 } from './accounts/maintenance.js';
+export { readRenewals, renewalJournalPath, tokenFingerprint } from './accounts/renewals.js';
 export {
   claudeApiHeaders,
   claudeAuthorizeUrl,

@@ -158,7 +158,10 @@ async function postToken(body, options = {}) {
 
   if (!response.ok) {
     const error = new Error(oauthErrorMessage(payload, response.status, text, options.grant));
-    if (options.grant === 'refresh' && payload?.error === 'invalid_grant') error.code = 'AUTH_EXPIRED';
+    if (options.grant === 'refresh' && payload?.error === 'invalid_grant') {
+      error.code = 'AUTH_EXPIRED';
+      error.reason = 'invalid_grant';
+    }
     throw error;
   }
   validateTokenPayload('claude', payload);

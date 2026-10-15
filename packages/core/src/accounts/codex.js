@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ensureDir, pathExists, readJson, writeFileAtomic } from '../fs-utils.js';
 import { accountDir, listAccounts, updateAccount } from './store.js';
 import { refreshCodexToken } from './codex-oauth.js';
+import { renewLogin } from './renewals.js';
 import { validateCodexCredentialPayload } from './provider-contracts.js';
 import { assertAgentStopped } from './processes.js';
 
@@ -231,11 +232,18 @@ export async function ensureCodexAccessToken(accountId, options = {}) {
   // Refreshing the live account would race Codex for its rotating token.
   if (!options.allowActiveRefresh && (await isActiveCodexAccount(accountId, options))) return auth;
 
-  const tokens = await refreshCodexToken(auth.refreshToken, options);
-  const updated = await writeCodexTokens(home, tokens, options);
-  const lastRefreshedAt = new Date().toISOString();
-  await updateAccount(accountId, identityPatch(updated, { lastRefreshedAt })).catch(() => {});
-  return updated;
+  return renewLogin(accountId, {
+    provider: CODEX_PROVIDER,
+    seen: auth,
+    read: () => readCodexAuth(home),
+    renew: async (current, renewalOptions) => {
+      const tokens = await refreshCodexToken(current.refreshToken, renewalOptions);
+      const updated = await writeCodexTokens(home, tokens, options);
+      const lastRefreshedAt = new Date().toISOString();
+      await updateAccount(accountId, identityPatch(updated, { lastRefreshedAt })).catch(() => {});
+      return updated;
+    }
+  }, options);
 }
 
 // Point the *official* Codex CLI and VS Code extension at this account by

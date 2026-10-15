@@ -61,6 +61,15 @@ test('only confirmed authentication failures receive explicit sign-in labels', (
   assert.equal(authenticationFailureLabel('AUTH_REJECTED'), 'Authentication rejected (AUTH_REJECTED)');
 });
 
+test('a dead login says why it needs a new sign-in, as Codex does; a rejected one says verify', () => {
+  assert.equal(authenticationFailureLabel('AUTH_EXPIRED', 'refresh_token_invalidated'), 'Signed out or signed in elsewhere · sign in again');
+  assert.equal(authenticationFailureLabel('AUTH_EXPIRED', 'refresh_token_reused'), 'Login renewed by another copy · sign in again');
+  assert.equal(authenticationFailureLabel('AUTH_EXPIRED', 'refresh_token_expired'), 'Login expired · sign in again');
+  assert.equal(authenticationFailureLabel('AUTH_EXPIRED', 'invalid_grant'), 'Login expired or renewed elsewhere · sign in again');
+  assert.equal(authenticationFailureLabel('AUTH_EXPIRED', 'something_new'), 'Authentication expired (AUTH_EXPIRED)');
+  assert.equal(authenticationFailureLabel('AUTH_REJECTED', 'refresh_token_invalidated'), 'Authentication rejected (AUTH_REJECTED)');
+});
+
 test('the account store records only coded authentication failures', async () => {
   const account = { id: 'claude-1', provider: 'claude', label: 'Personal' };
   const api = {

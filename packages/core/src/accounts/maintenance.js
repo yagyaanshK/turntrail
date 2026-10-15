@@ -18,7 +18,8 @@ import {
   readClaudeAuth,
   syncActiveClaudeAccount
 } from './claude.js';
-import { getClaudeUsage, getCodexUsage } from './quota.js';
+import { getClaudeUsage, getCodexUsage, recordAuthenticationFailure } from './quota.js';
+import { deadLogin, deadLoginError } from './renewals.js';
 import { listAgentProcesses, matchingAgentProcesses } from './processes.js';
 import { accountsRoot, listAccounts } from './store.js';
 
@@ -59,6 +60,7 @@ export async function maintainAccounts(options = {}) {
           options.signal?.throwIfAborted();
           results.push(await maintainAccount(account, {
             ...options,
+            renewalSource: options.renewalSource || 'maintenance',
             observedAgentProcesses,
             claudeRunning,
             codexRunning,
@@ -91,20 +93,41 @@ export async function maintainAccounts(options = {}) {
   }
 }
 
+// One account's failure is that account's result, never the end of the run:
+// every account after it still has to be kept alive.
 async function maintainAccount(account, options) {
   try {
-    if (account.provider === 'codex') return maintainCodexAccount(account, options);
-    if (account.provider === 'claude') return maintainClaudeAccount(account, options);
+    if (account.provider === 'codex') return await maintainCodexAccount(account, options);
+    if (account.provider === 'claude') return await maintainClaudeAccount(account, options);
     return result(account, 'skipped', { reason: 'unsupported-provider' });
   } catch (error) {
+    if (error?.code === 'AUTH_EXPIRED') return signInRequired(account, error, options);
     return result(account, 'failed', { error: error.message });
   }
+}
+
+// A login whose refresh token the provider has already refused is not sent
+// again, here or anywhere: the answer cannot change until a new sign-in.
+async function knownDeadLogin(account, auth, options) {
+  const dead = await deadLogin(account.id, auth?.refreshToken, options);
+  return dead ? signInRequired(account, deadLoginError(dead), options) : undefined;
+}
+
+async function signInRequired(account, error, options) {
+  await recordAuthenticationFailure(
+    account.id,
+    { code: 'AUTH_EXPIRED', reason: error.reason, message: error.message },
+    options
+  ).catch(() => {});
+  return result(account, 'sign-in-required', { reason: error.reason, error: error.message });
 }
 
 async function maintainCodexAccount(account, options) {
   const before = await readCodexAuth(codexHome(account.id, options));
   if (before?.apiKey) return result(account, 'skipped', { reason: 'api-key' });
   if (!before?.accessToken) return result(account, 'skipped', { reason: 'not-signed-in' });
+  const dead = await knownDeadLogin(account, before, options);
+  if (dead) return dead;
 
   const active = await isActiveCodexAccount(account.id, options);
   const synchronizedActive = active ? await syncActiveCodexAccount(account.id, options) : false;
@@ -140,6 +163,8 @@ async function maintainCodexAccount(account, options) {
 async function maintainClaudeAccount(account, options) {
   const before = await readClaudeAuth(claudeHome(account.id, options), options);
   if (!before?.accessToken) return result(account, 'skipped', { reason: 'not-signed-in' });
+  const dead = await knownDeadLogin(account, before, options);
+  if (dead) return dead;
 
   if (!options.claudeRunning && options.maintainedClaudeAccountId === account.id) {
     const maintained = await maintainIdleClaudeLogin(account.id, options);
@@ -213,6 +238,13 @@ function credentialChanged(before, after) {
 }
 
 function usageResult(account, usage, details) {
+  if (usage?.requiresSignIn) {
+    return result(account, 'sign-in-required', {
+      ...details,
+      reason: usage.authenticationReason,
+      error: usage.error || usage.staleReason
+    });
+  }
   if (usage?.error) return result(account, 'failed', { ...details, error: usage.error });
   if (usage?.staleReason) return result(account, 'stale', { ...details, error: usage.staleReason });
   return result(account, details.refreshed ? 'refreshed' : 'checked', details);

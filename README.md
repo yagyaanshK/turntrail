@@ -404,6 +404,16 @@ still running when renewal becomes due, Turntrail makes no provider request and 
 after 15 minutes. There is no inference request, generated prompt, telemetry, or Turntrail server
 involved.
 
+Every renewal, whether from maintenance, a panel refresh or a switch, takes a per-account lock shared
+by all editors and the CLI. Holding it, Turntrail re-reads the login and renews only if no other
+window just did, so two windows never spend the same refresh token. A renewal already sent is not
+cancelled when its window closes. Each attempt is recorded in `accounts/<id>/renewals.json` with
+how it ended (renewed, refused, failed or interrupted) and short fingerprints of the tokens, never
+the tokens themselves. A refresh token the provider has refused is never sent again; the account
+shows why it needs a new sign-in (expired, renewed by another copy, or signed out and signed in
+elsewhere, as Codex distinguishes them) instead of asking you to verify it. One account that needs a
+sign-in no longer stops maintenance of the others.
+
 If a provider rejects a locally unexpired access token during maintenance, Turntrail attempts one
 refresh and retries the usage check. It repairs the selected machine-default credential only when no
 process for that provider is running; otherwise it defers instead of racing the official client.

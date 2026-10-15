@@ -54,7 +54,10 @@ user setting. A workspace cannot opt the user in. When enabled, the editor conta
 configured OpenAI and Anthropic token and usage endpoints on a jittered interval. It sends no
 transcript content, telemetry, or model/inference request. API-key accounts are skipped.
 
-A machine-wide lock serializes editor windows, VS Code forks, and CLI schedulers. Inactive OAuth
+A machine-wide lock serializes editor windows, VS Code forks, and CLI schedulers, and a per-account
+lock serializes every renewal of the same login, including panel refreshes and switches. The
+renewal journal (`accounts/<id>/renewals.json`) records outcomes and truncated SHA-256 fingerprints
+of refresh tokens; it never contains a token, and a fingerprint cannot be used as one. Inactive OAuth
 accounts are refreshed only when their access-token expiry says renewal is due. Turntrail never
 refreshes a Claude credential while a Claude process is detected; it validates and synchronizes
 that client's rotated credential back into the managed snapshot instead. When Claude is stopped,

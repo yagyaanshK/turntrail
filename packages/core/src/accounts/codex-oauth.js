@@ -50,7 +50,11 @@ export async function refreshCodexToken(refreshToken, options = {}) {
 
   if (!response.ok) {
     const error = new Error(codexOauthError(payload, response.status, text));
-    if (isExpiredLogin(payload, text)) error.code = 'AUTH_EXPIRED';
+    if (isExpiredLogin(payload, text)) {
+      error.code = 'AUTH_EXPIRED';
+      const { code } = codexErrorFields(payload);
+      if (DEAD_LOGIN_MESSAGES[code]) error.reason = code;
+    }
     throw error;
   }
   validateTokenPayload('codex', payload);
@@ -70,6 +74,7 @@ export async function refreshCodexToken(refreshToken, options = {}) {
 // symptom of two things having refreshed the same account.
 function codexOauthError(payload, status, text) {
   const { code } = codexErrorFields(payload);
+  if (DEAD_LOGIN_MESSAGES[code]) return DEAD_LOGIN_MESSAGES[code];
   if (isExpiredLogin(payload, text)) {
     return 'This login has expired or was renewed elsewhere and cannot be refreshed. Sign in again.';
   }
@@ -77,10 +82,21 @@ function codexOauthError(payload, status, text) {
   return `Token refresh failed with HTTP ${status}.`;
 }
 
+// The three ways Codex itself tells a dead refresh token apart, each needing a
+// new sign-in. Invalidated is what OpenAI answers after the account signs out,
+// or signs in again somewhere, which ends earlier logins.
+const DEAD_LOGIN_MESSAGES = {
+  refresh_token_expired: 'This Codex login has expired. Sign in again.',
+  refresh_token_reused:
+    'This Codex login was already renewed by another copy of it, so this copy can no longer be renewed. Sign in again.',
+  refresh_token_invalidated:
+    'This Codex login was ended because the account signed out, or signed in again elsewhere. Sign in again.'
+};
+
 function isExpiredLogin(payload, text) {
   const { code, detail } = codexErrorFields(payload);
-  return code === 'invalid_grant' || code === 'invalid_refresh_token' || code === 'refresh_token_reused' ||
-    /reuse|already been used|revoked|expired|invalid refresh token/i.test(`${code} ${detail} ${text}`);
+  return code === 'invalid_grant' || code === 'invalid_refresh_token' || Boolean(DEAD_LOGIN_MESSAGES[code]) ||
+    /reuse|already been used|revoked|expired|invalidated|invalid refresh token/i.test(`${code} ${detail} ${text}`);
 }
 
 function codexErrorFields(payload) {

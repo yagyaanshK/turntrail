@@ -292,8 +292,10 @@ the Accounts panel, and the **Turntrail: Toggle Background Account Maintenance**
 Run Account Maintenance Now** commands do the same. While an editor is open, Turntrail then
 performs a jittered maintenance run about every five hours: refresh due inactive OAuth credentials,
 read quota, and update the local cache. A machine-wide lock prevents simultaneous refreshes from
-multiple VS Code-compatible editors or a CLI scheduler. API-key accounts are skipped, and no
-model/inference request is used as a keep-alive.
+multiple VS Code-compatible editors or a CLI scheduler, and every renewal of one login, from any
+window, goes one at a time and is recorded without its tokens. API-key accounts are skipped, and no
+model/inference request is used as a keep-alive. An account that needs a new sign-in no longer
+stops maintenance of the others, and its refused login is not sent again.
 
 A provider `401` triggers one refresh-and-retry when the account is inactive, or when it is selected
 but no provider process is running. A selected account owned by a running provider process is

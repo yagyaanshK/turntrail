@@ -6,6 +6,7 @@ import { accountDir, getAccount, updateAccount } from './store.js';
 import { ensureCodexAccessToken } from './codex.js';
 import { defaultClaudeHome, ensureClaudeAccessToken, isActiveClaudeAccount, readClaudeAuth } from './claude.js';
 import { listAgentProcesses, matchingAgentProcesses } from './processes.js';
+import { deadLogin, deadLoginError } from './renewals.js';
 import { claudeApiHeaders } from './claude-oauth.js';
 import { providerFetch } from './http.js';
 import {
@@ -99,7 +100,15 @@ async function getUsage(accountId, read, fetchUsage, options = {}) {
     const usage = await fetchUsage(auth, options);
     await writeQuotaCache(accountId, { accountId, ...usage }, options);
     return { accountId, ...usage, fromCache: false };
-  } catch (error) {
+  } catch (caught) {
+    // A rejected access token on its own means "verify": renewing may fix it.
+    // Once the provider has refused this login's refresh token too, nothing
+    // but signing in again will, and the card should say so.
+    let error = caught;
+    if (error?.code === 'AUTH_REJECTED') {
+      const dead = await deadLogin(accountId, auth.refreshToken, options);
+      if (dead) error = deadLoginError(dead);
+    }
     // A failed refresh must not discard a good previous reading - the panel is
     // more useful showing a stale number with its age than showing nothing.
     return usageFailure(accountId, cached, error, options);
@@ -140,6 +149,10 @@ function failureState(error) {
     : undefined;
   if (authenticationFailure) return {
     authenticationFailure,
+    // Which refusal it was, as a provider code, so the card can say why.
+    authenticationReason: authenticationFailure === 'AUTH_EXPIRED' && /^[A-Za-z0-9_.-]{1,64}$/.test(error.reason || '')
+      ? error.reason
+      : undefined,
     requiresSignIn: authenticationFailure === 'AUTH_EXPIRED',
     requiresRevalidation: authenticationFailure === 'AUTH_REJECTED'
   };
@@ -156,13 +169,22 @@ function withoutRuntimeFields(usage) {
 }
 
 function withoutAuthenticationFailure(usage) {
-  const { authenticationFailure, requiresSignIn, requiresRevalidation, statusCheckedAt, error, ...rest } = usage;
+  const {
+    authenticationFailure,
+    authenticationReason,
+    requiresSignIn,
+    requiresRevalidation,
+    statusCheckedAt,
+    error,
+    ...rest
+  } = usage;
   return rest;
 }
 
 export async function recordAuthenticationFailure(accountId, failure, options = {}) {
   const error = new Error(failure?.message || failure?.error || 'Authentication failed.');
   error.code = failure?.code;
+  error.reason = failure?.reason;
   if (!failureState(error).authenticationFailure) return null;
   return usageFailure(accountId, await readQuotaCache(accountId, options), error, options);
 }
