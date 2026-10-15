@@ -996,3 +996,99 @@ test('an idle expired account is still refreshed', async () => {
   assert.equal(sawRefresh, true, 'an idle account with no live copy is renewed the old way');
   assert.equal(auth.accessToken, 'renewed');
 });
+
+// --- the active login while Claude Code renews it -----------------------------
+
+const claudeRunning = [{ pid: 7, name: 'claude.exe' }];
+const rejected = async () => ({ ok: false, status: 401, statusText: 'Unauthorized' });
+const usageOk = async () => ({ ok: true, status: 200, json: async () => LIVE_USAGE });
+
+test('an expired active login is left for Claude Code to renew, not reported as broken', async () => {
+  const { options } = await sandbox();
+  const account = await createAccount({ label: 'Active', provider: 'claude' }, options);
+  await signIn(account.id, options);
+  await makeActiveWithDriftedSnapshot(account.id, options);
+  await getClaudeUsage(account.id, { ...options, fetch: usageOk });
+
+  // The eight hours run out. An earlier read, with no Claude process about to
+  // renew it, recorded the rejection.
+  await makeActiveWithDriftedSnapshot(account.id, options, { expiresAt: Date.now() - 1000 });
+  const broken = await getClaudeUsage(account.id, { ...options, force: true, fetch: rejected });
+  assert.equal(broken.requiresRevalidation, true, 'with nothing to renew it, a rejection is reported as before');
+
+  // Now Claude Code is running and will renew it.
+  let requests = 0;
+  const waiting = await getClaudeUsage(account.id, {
+    ...options,
+    agentProcesses: claudeRunning,
+    force: true,
+    fetch: async () => {
+      requests++;
+      return rejected();
+    }
+  });
+  assert.equal(requests, 0, 'a token known to be dead is not sent');
+  assert.equal(waiting.renewingLogin, true);
+  assert.match(waiting.staleReason, /Waiting for Claude Code to renew/);
+  assert.equal(waiting.windows.length, 2, 'the last reading is kept');
+  assert.equal(waiting.requiresRevalidation, undefined);
+  assert.equal(waiting.authenticationFailure, undefined);
+  assert.equal(waiting.error, undefined);
+
+  // Claude Code renews it, and the next read just works.
+  await makeActiveWithDriftedSnapshot(account.id, options, { accessToken: 'renewed-by-claude' });
+  const renewed = await getClaudeUsage(account.id, { ...options, agentProcesses: claudeRunning, force: true, fetch: usageOk });
+  assert.equal(renewed.renewingLogin, undefined);
+  assert.equal(renewed.requiresRevalidation, undefined);
+  assert.equal(renewed.fromCache, false);
+});
+
+test('waiting for Claude Code to renew is never saved as the account\'s state', async () => {
+  const { options } = await sandbox();
+  const account = await createAccount({ label: 'Active', provider: 'claude' }, options);
+  await signIn(account.id, options);
+  await makeActiveWithDriftedSnapshot(account.id, options, { expiresAt: Date.now() - 1000 });
+
+  const waiting = await getClaudeUsage(account.id, { ...options, agentProcesses: claudeRunning, force: true, fetch: rejected });
+  assert.equal(waiting.renewingLogin, true);
+  assert.match(waiting.error, /Waiting for Claude Code to renew/, 'with no earlier reading, the wait is the message');
+  assert.equal(await getClaudeUsage(account.id, { ...options, offline: true }), null);
+});
+
+test('a rejection is retried with the login Claude Code renewed while the request was in flight', async () => {
+  const { options } = await sandbox();
+  const account = await createAccount({ label: 'Active', provider: 'claude' }, options);
+  await signIn(account.id, options);
+  // Seconds from expiry: Turntrail sends it, Claude Code renews it meanwhile.
+  await makeActiveWithDriftedSnapshot(account.id, options, { expiresAt: Date.now() + 90 * 1000 });
+
+  const sent = [];
+  const usage = await getClaudeUsage(account.id, {
+    ...options,
+    agentProcesses: claudeRunning,
+    force: true,
+    fetch: async (url, init) => {
+      sent.push(init.headers.Authorization || init.headers.authorization);
+      if (sent.length === 1) {
+        await makeActiveWithDriftedSnapshot(account.id, options, { accessToken: 'renewed-mid-request' });
+        return rejected();
+      }
+      return usageOk();
+    }
+  });
+  assert.equal(sent.length, 2);
+  assert.match(sent[1], /renewed-mid-request/);
+  assert.equal(usage.windows.length, 2);
+  assert.equal(usage.requiresRevalidation, undefined);
+});
+
+test('a rejected active login that has not expired is still reported, even while Claude Code runs', async () => {
+  const { options } = await sandbox();
+  const account = await createAccount({ label: 'Active', provider: 'claude' }, options);
+  await signIn(account.id, options);
+  await makeActiveWithDriftedSnapshot(account.id, options);
+
+  const usage = await getClaudeUsage(account.id, { ...options, agentProcesses: claudeRunning, force: true, fetch: rejected });
+  assert.equal(usage.requiresRevalidation, true, 'a revoked login is not hidden behind a renewal that is not coming');
+  assert.equal(usage.renewingLogin, undefined);
+});

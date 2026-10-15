@@ -127,6 +127,34 @@ test('a Claude usage permission failure is presented as an unavailable subscript
   assert.equal(row.recommended, false);
 });
 
+test('a login Claude Code is renewing keeps its last reading and is retried, not flagged', async () => {
+  const account = { id: 'claude-active', provider: 'claude', label: 'Active' };
+  const api = {
+    listAccounts: async ({ provider } = {}) => provider === 'claude' ? [account] : [],
+    activeCodexAccountId: async () => undefined,
+    activeClaudeAccountId: async () => account.id,
+    isSignedIn: async () => false,
+    isClaudeSignedIn: async () => true,
+    resumesAt: () => undefined
+  };
+  const store = new AccountsStore(async () => api);
+  store.usage.set(account.id, {
+    accountId: account.id,
+    fetchedAt: new Date().toISOString(),
+    fromCache: true,
+    renewingLogin: true,
+    staleReason: 'Waiting for Claude Code to renew this login. Limits update once it has.',
+    windows: [{ label: '5h', remainingPercent: 64 }]
+  });
+
+  const row = (await store.viewModel()).sections.find((section) => section.id === 'claude').rows[0];
+  assert.equal(row.renewingLogin, true);
+  assert.equal(row.signedIn, true);
+  assert.equal(row.requiresRevalidation, false);
+  assert.equal(row.health.id, 'usage-stale', 'stale readings are read again when the panel is next opened');
+  assert.equal(row.windows[0].remaining, 64);
+});
+
 test('the account store refreshes stale usage without polling fresh accounts', async () => {
   const old = { id: 'claude-old', provider: 'claude', label: 'Old' };
   const fresh = { id: 'claude-fresh', provider: 'claude', label: 'Fresh' };

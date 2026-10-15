@@ -4,7 +4,8 @@ import path from 'node:path';
 import { ensureDir, pathExists, readJson, writeJson } from '../fs-utils.js';
 import { accountDir, getAccount, updateAccount } from './store.js';
 import { ensureCodexAccessToken } from './codex.js';
-import { ensureClaudeAccessToken } from './claude.js';
+import { defaultClaudeHome, ensureClaudeAccessToken, isActiveClaudeAccount, readClaudeAuth } from './claude.js';
+import { listAgentProcesses, matchingAgentProcesses } from './processes.js';
 import { claudeApiHeaders } from './claude-oauth.js';
 import { providerFetch } from './http.js';
 import {
@@ -107,6 +108,12 @@ async function getUsage(accountId, read, fetchUsage, options = {}) {
 
 async function usageFailure(accountId, cached, error, options = {}) {
   const state = failureState(error);
+  // An earlier read in the same renewal gap may have been recorded as a
+  // rejected login. It was not one, and a reading with no windows has nothing
+  // left worth keeping.
+  if (state.renewingLogin && cached) {
+    cached = (cached.windows || []).length > 0 ? withoutAuthenticationFailure(cached) : null;
+  }
   const result = cached
     ? { ...cached, fromCache: true, staleReason: error.message, ...state }
     : {
@@ -139,12 +146,18 @@ function failureState(error) {
   if (error?.code === 'USAGE_PERMISSION_DENIED') {
     return { usageAccessFailure: 'USAGE_PERMISSION_DENIED' };
   }
+  if (error?.code === CLAUDE_RENEWING) return { renewingLogin: true };
   return {};
 }
 
 function withoutRuntimeFields(usage) {
   const { fromCache, ...persisted } = usage;
   return persisted;
+}
+
+function withoutAuthenticationFailure(usage) {
+  const { authenticationFailure, requiresSignIn, requiresRevalidation, statusCheckedAt, error, ...rest } = usage;
+  return rest;
 }
 
 export async function recordAuthenticationFailure(accountId, failure, options = {}) {
@@ -166,7 +179,12 @@ export async function getCodexUsage(accountId, options = {}) {
 }
 
 export async function getClaudeUsage(accountId, options = {}) {
-  const usage = await getUsage(accountId, ensureClaudeAccessToken, fetchClaudeUsage, options);
+  const usage = await getUsage(
+    accountId,
+    readClaudeForUsage,
+    (auth, opts) => fetchClaudeUsageForAccount(accountId, auth, opts),
+    options
+  );
   await reconcileUsagePlan(accountId, usage, options);
   return usage;
 }
@@ -186,6 +204,67 @@ async function reconcileUsagePlan(accountId, usage, options = {}) {
     // Quota is still useful when optional registry metadata cannot be updated.
     // A later successful network read will try the reconciliation again.
   }
+}
+
+// The active login is Claude Code's to renew, every eight hours, and Turntrail
+// must not (see ensureClaudeAccessToken). Between the token expiring and Claude
+// renewing it the live token is simply dead, and that gap grows when several
+// Claude processes share one login and queue for Claude's refresh lock. A read
+// in that gap would be rejected and recorded as a login needing repair, when
+// all it needs is for Claude Code to finish. While Claude Code is running, the
+// gap is shown as a stale reading and nothing is persisted. With no Claude
+// process left to renew it, a rejection is reported as before.
+const CLAUDE_RENEWING = 'CLAUDE_RENEWING';
+const CLAUDE_EXPIRY_SKEW_MS = 60 * 1000;
+
+async function readClaudeForUsage(accountId, options) {
+  const auth = await ensureClaudeAccessToken(accountId, options);
+  if (auth?.accessToken && claudeTokenExpired(auth) && (await claudeRenewsThisLogin(accountId, options))) {
+    throw claudeRenewingError();
+  }
+  return auth;
+}
+
+async function fetchClaudeUsageForAccount(accountId, auth, options) {
+  try {
+    return await fetchClaudeUsage(auth, options);
+  } catch (error) {
+    if (error?.code !== 'AUTH_REJECTED' || options.allowActiveRefresh) throw error;
+    if (!(await isActiveClaudeAccount(accountId, options))) throw error;
+    // Claude Code may have renewed the login while the request was in flight.
+    const live = await readClaudeAuth(defaultClaudeHome(options), options);
+    if (live?.accessToken && live.accessToken !== auth.accessToken) return fetchClaudeUsage(live, options);
+    if (claudeTokenExpired(live || auth) && (await claudeIsRunning(options))) throw claudeRenewingError();
+    throw error;
+  }
+}
+
+async function claudeRenewsThisLogin(accountId, options) {
+  if (options.allowActiveRefresh) return false;
+  return (await isActiveClaudeAccount(accountId, options)) && (await claudeIsRunning(options));
+}
+
+// Maintenance has already looked, so it says; otherwise look now. Only an
+// expired active login gets this far, so the process listing is rare. If the
+// listing fails, the login is not called broken on the strength of not knowing.
+async function claudeIsRunning(options) {
+  if (typeof options.claudeRunning === 'boolean') return options.claudeRunning;
+  try {
+    return matchingAgentProcesses('claude', await listAgentProcesses(options)).length > 0;
+  } catch {
+    return true;
+  }
+}
+
+function claudeTokenExpired(auth) {
+  const expiresAt = Number(auth?.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt - CLAUDE_EXPIRY_SKEW_MS <= Date.now();
+}
+
+function claudeRenewingError() {
+  const error = new Error('Waiting for Claude Code to renew this login. Limits update once it has.');
+  error.code = CLAUDE_RENEWING;
+  return error;
 }
 
 export async function fetchClaudeUsage(auth, options = {}) {

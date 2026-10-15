@@ -229,6 +229,7 @@ class AccountsStore {
       resumesAt: resumesAt ? resumesAt(usage) : undefined,
       fetchedAt: usage?.fetchedAt,
       staleReason: usage?.staleReason,
+      renewingLogin: usage?.renewingLogin === true,
       loaded: Boolean(usage),
       windows: windows.map((window) => ({
         label: window.label,
@@ -873,6 +874,7 @@ function renderRow(row) {
   }
   else if (row.requiresRevalidation) status = row.active ? 'Selected login needs repair' : 'Login needs verification';
   else if (!row.signedIn) status = row.active ? 'Selected login needs sign-in' : 'Not signed in';
+  else if (row.renewingLogin) status = 'Waiting for Claude Code to renew this login';
   else if (row.error) status = esc(row.error);
   // "Limit reached" on its own leaves the one question that matters
   // unanswered. The resume time is the whole reason to look at the card.

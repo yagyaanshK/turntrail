@@ -384,7 +384,10 @@ name and are described only as a separate allowance.
 Access tokens expire, and each official client normally renews only the account it is currently
 using. A quota read renews an inactive OAuth account only when its access-token expiry says renewal
 is due. While Claude is running, the official client owns its rotating refresh token and Turntrail
-only copies the latest credential back into the managed snapshot. While Claude is stopped,
+only copies the latest credential back into the managed snapshot. If that login has just expired
+and Claude has not renewed it yet, the card keeps its last reading and says **Waiting for Claude Code
+to renew this login** instead of reporting a broken login. This gap is longer when several Claude
+windows share one login (VS Code and Kiro, say) and wait their turn to renew it. While Claude is stopped,
 Turntrail can proactively renew the active login and atomically update both copies, writing the live
 credential first. It can also restore a missing or blank live credential when one managed account,
 or the retained Claude profile, identifies the account unambiguously. API-key accounts have no

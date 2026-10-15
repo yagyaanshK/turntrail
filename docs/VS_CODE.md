@@ -243,7 +243,10 @@ retries after 15 minutes. A machine-wide lock prevents duplicate refreshes acros
 schedulers. The interval can be changed with `turntrail.accountMaintenance.intervalHours` (1-24).
 When a provider rejects a locally unexpired access token, maintenance attempts one refresh and
 retries the usage request. It repairs a selected machine-default credential only when that provider
-has no running process; otherwise the repair is deferred.
+has no running process; otherwise the repair is deferred. A selected Claude login that has expired
+while Claude is running is Claude's to renew, so the card keeps its last reading, reads **Waiting for
+Claude Code to renew this login**, and is read again the next time the panel opens. Nothing about it is
+saved as a login failure.
 This reduces stale-login failures but cannot guarantee persistence: providers may revoke sessions
 before their local expiry, and extension maintenance cannot run while every editor is closed.
 Turntrail never spends quota on a synthetic inference request merely to keep a login warm. API-key
