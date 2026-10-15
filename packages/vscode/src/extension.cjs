@@ -113,7 +113,7 @@ async function activateExtension(context) {
     ...compatibleCommands('signInAccount', (item) => signInAccount(item)),
     ...compatibleCommands('refreshAccountQuota', (item) => refreshAccountQuota(item)),
     ...compatibleCommands('useCodexReset', (item) => useCodexReset(item)),
-    ...compatibleCommands('retryAccountLogin', (item) => retryAccountLogin(item)),
+    ...compatibleCommands('repairAccountLogin', (item) => repairAccountLogin(item)),
     ...compatibleCommands('openAccountTerminal', (item) => openAccountTerminal(item)),
     ...compatibleCommands('renameAccount', (item) => renameAccount(item)),
     ...compatibleCommands('forgetAccount', (item) => forgetAccount(item)),
@@ -872,19 +872,19 @@ async function refreshAccountQuota(item) {
   }
 }
 
-// "Try again" on a card whose access token was turned away. It runs the one
+// "Repair login" on a card whose access token was turned away. It runs the one
 // renewal maintenance would, for this account only, through the same lock and
 // renewal log, so pressing it twice never spends a token twice. It either
 // brings the login back or shows why it needs a new sign-in.
-async function retryAccountLogin(item) {
+async function repairAccountLogin(item) {
   if (!item?.accountId || !item?.provider) return;
   const api = await core();
   const agent = agentName(item.provider);
-  const maintenance = await withProgress(`Trying the ${agent} login again`, ({ signal }) =>
+  const maintenance = await withProgress(`Repairing the ${agent} login`, ({ signal }) =>
     api.maintainAccounts({
       accountIds: [item.accountId],
       maintenanceLockTimeoutMs: 60_000,
-      renewalSource: 'try-again',
+      renewalSource: 'repair',
       signal
     })
   );
@@ -893,13 +893,13 @@ async function retryAccountLogin(item) {
 
   const outcome = maintenance.results?.[0];
   if (maintenance.locked) {
-    vscode.window.showInformationMessage('Turntrail: another window is maintaining accounts. Try again in a minute.');
+    vscode.window.showInformationMessage('Turntrail: another window is maintaining accounts. Press Repair login again in a minute.');
   } else if (outcome?.status === 'checked' || outcome?.status === 'refreshed') {
-    vscode.window.setStatusBarMessage(`Turntrail: the ${agent} login works again.`, 5000);
+    vscode.window.setStatusBarMessage(`Turntrail: the ${agent} login is repaired.`, 5000);
   } else if (outcome?.status === 'deferred') {
     vscode.window.showInformationMessage(
       `Turntrail: ${agent} is running and is using this login, so Turntrail will not renew it underneath ${agent}. ` +
-        `${agent} renews it itself when it needs to; to have Turntrail try now, close ${agent} and press Try again.`
+        `${agent} renews it itself when it needs to; to have Turntrail try now, close ${agent} and press Repair login.`
     );
   } else if (outcome?.status === 'sign-in-required') {
     const choice = await vscode.window.showWarningMessage(`Turntrail: ${outcome.error}`, 'Sign in again');
@@ -907,7 +907,7 @@ async function retryAccountLogin(item) {
       await vscode.commands.executeCommand('turntrail.signInAccount', { accountId: item.accountId, provider: item.provider });
     }
   } else if (outcome?.error) {
-    vscode.window.showWarningMessage(`Turntrail: the ${agent} login could not be checked: ${outcome.error}`);
+    vscode.window.showWarningMessage(`Turntrail: the ${agent} login could not be repaired: ${outcome.error}`);
   }
 }
 

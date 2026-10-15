@@ -1,8 +1,8 @@
 # How Turntrail Keeps Logins Alive
 
 This page explains when Turntrail renews a saved Codex or Claude Code login, what a limits refresh
-does and does not do, what a card's **Try again** button does, how background maintenance behaves,
-and what changed in 0.18.23. It reflects Turntrail 0.18.24.
+does and does not do, what a card's **Repair login** button does, how background maintenance behaves,
+and what changed in 0.18.23. It reflects Turntrail 0.18.25.
 
 ## Terms
 
@@ -14,8 +14,10 @@ and what changed in 0.18.23. It reflects Turntrail 0.18.24.
   signed in as.
 - **Active account**: the one Codex or Claude Code is currently signed in as, in `~/.codex` or
   `~/.claude`. Its renewal belongs to that client.
-- **Verify**: the provider turned away the access token (a `401` on the limits request), but the
-  refresh token has not been refused. A renewal may still fix it.
+- **Needs repair**: the provider turned away the access token (a `401` on the limits request), but
+  the refresh token has not been refused. A renewal may still fix it. The card's badge reads
+  **Repair required**. Turntrail used to call this state "verify"; the providers themselves send only
+  the `401`.
 - **Sign in again**: the provider refused the refresh token itself. Only a new sign-in fixes it.
 
 ## Refreshing limits on a card or in the panel
@@ -27,18 +29,18 @@ This behaviour is the same before and after 0.18.23.
 |---|---|---|
 | Inactive account | Renews first if the access token expires within 3 days, then reads limits | Renews first if the access token has already expired, then reads limits |
 | Active account | Never renews; Codex owns it | Never renews; reads the token Claude Code keeps fresh |
-| Limits request rejected (`401`) | Card shows **verify**. No renewal is tried | Card shows **verify**. No renewal is tried |
+| Limits request rejected (`401`) | Card shows **Repair required**. No renewal is tried | Card shows **Repair required**. No renewal is tried |
 
-A card's refresh button therefore does not usually fix a **verify** account. Its access token is
+A card's refresh button therefore does not usually fix an account that needs repair. Its access token is
 usually not yet expired, so the refresh decides "not due", sends the same token, and is turned away
 again. The exception is a Codex access token within 3 days of expiry: then the refresh does renew,
-which can fix it. The refresh button only reads limits; renewing a **verify** login is the job of
-the card's **Try again** button.
+which can fix it. The refresh button only reads limits; renewing a login that needs repair is the job
+of the card's **Repair login** button.
 
-## Try again
+## Repair login
 
-A card in the **verify** state shows **Try again**. A card whose refresh token was refused shows
-**Sign in again** instead. Try again runs the same steps maintenance runs for a rejected login, for
+A card that needs repair shows **Repair login**. A card whose refresh token was refused shows
+**Sign in again** instead. Repair login runs the same steps maintenance runs for a rejected login, for
 that one account only:
 
 1. Read limits again.
@@ -57,10 +59,10 @@ repeatedly never spends a token twice, and never resends a refused one. The outc
 - **The login works again**, and the card shows its limits.
 - **Sign in again**: the provider refused the refresh token. The card switches to **Sign in again**
   with the reason, and the message offers to start the sign-in.
-- **Still rejected** after a successful renewal, or a network error: the card stays on **verify**,
+- **Still rejected** after a successful renewal, or a network error: the card stays on **Repair required**,
   and the message gives the error.
 
-Try again works whether background maintenance is on or off.
+Repair login works whether background maintenance is on or off.
 
 While Claude Code is running, an active Claude login that has just expired is shown as **Waiting for
 Claude Code to renew this login**, with the last reading kept. Claude Code renews it itself; nothing
@@ -95,7 +97,7 @@ maintenance lock, or when the whole run failed. Otherwise the next run is 5 hour
 | | Before | Now |
 |---|---|---|
 | A forced renewal on a `401` fails | The error ended the whole run, no later account was maintained, and every window retried every 15 minutes | Only that account is marked **sign in again**; the run continues and counts as done |
-| Codex `refresh_token_invalidated` | Not recognised, so the card stayed on **verify** and the dead token was resent every run | Recognised: "Signed out or signed in elsewhere · sign in again", and the token is not sent again |
+| Codex `refresh_token_invalidated` | Not recognised, so the card stayed on "verify" and the dead token was resent every run | Recognised: "Signed out or signed in elsewhere · sign in again", and the token is not sent again |
 | Two windows renew the same login | Possible from a panel refresh, because only maintenance had a lock | One at a time per account; the second window reuses the first one's result |
 | A window closes during a renewal | The request was cancelled, and the new token could be lost | The request finishes and the token is saved; 60-second timeout instead of 20 |
 | Record of renewals | None | `renewals.json` per account, with outcome and fingerprints only |
@@ -112,7 +114,7 @@ When the refresh token is refused, the card says why, following the distinctions
 | Claude `invalid_grant` | Login expired or renewed elsewhere · sign in again |
 
 A `401` on a login whose refresh token is already on record as refused is also shown as **sign in
-again**, not **verify**.
+again**, not **Repair required**.
 
 ### One renewal at a time
 
@@ -147,7 +149,7 @@ the answer arrived. That case is worth knowing about if the next renewal is refu
 
 - `packages/core/src/accounts/renewals.js`: the per-account lock, re-read, refused-token check,
   renewal log, and the renewal's own timeout.
-- `packages/core/src/accounts/quota.js`: limits reads, and the decision between **verify**,
+- `packages/core/src/accounts/quota.js`: limits reads, and the decision between **needs repair**,
   **sign in again** and **waiting for Claude Code**.
 - `packages/core/src/accounts/maintenance.js`: maintenance runs, each account kept separate.
 - `packages/core/src/accounts/codex.js` and `claude.js`: when a login is due
@@ -155,5 +157,5 @@ the answer arrived. That case is worth knowing about if the next renewal is refu
 - `packages/core/src/accounts/codex-oauth.js` and `claude-oauth.js`: the renewal requests and how
   refusals are read.
 - `packages/vscode/src/account-maintenance.cjs`: the 5-hour schedule and the 15-minute retry.
-- `retryAccountLogin` in `packages/vscode/src/extension.cjs`: the card's **Try again**, which runs
+- `repairAccountLogin` in `packages/vscode/src/extension.cjs`: the card's **Repair login**, which runs
   maintenance for one account (`maintainAccounts({ accountIds })`).

@@ -228,7 +228,7 @@ test('Codex\'s reasons a login cannot be renewed are told apart, and all say sig
       return json(401, {});
     }
   });
-  assert.equal(rejected.requiresSignIn, true, 'a dead login is "sign in again", not "verify"');
+  assert.equal(rejected.requiresSignIn, true, 'a dead login is "sign in again", not "repair"');
   assert.equal(rejected.requiresRevalidation, false);
   assert.equal(rejected.authenticationReason, 'refresh_token_invalidated');
 });
@@ -272,9 +272,9 @@ test('one dead login does not stop maintenance of every account after it', async
   assert.equal(offline.requiresSignIn, true);
 });
 
-test('Try again renews one rejected login and leaves every other account alone', async () => {
+test('Repair login renews one rejected login and leaves every other account alone', async () => {
   const options = await sandbox();
-  // Its access token has not expired but is turned away: the "verify" state.
+  // Its access token has not expired but is turned away: the "repair" state.
   // Five days out, beyond the 3-day window in which a limits read renews it anyway.
   const verify = await codexAccount(options, 'verify', hoursFromNow(120), 'rt.verify');
   const other = await codexAccount(options, 'other', hoursFromNow(-1), 'rt.other');

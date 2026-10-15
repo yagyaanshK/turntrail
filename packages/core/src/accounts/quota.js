@@ -101,7 +101,7 @@ async function getUsage(accountId, read, fetchUsage, options = {}) {
     await writeQuotaCache(accountId, { accountId, ...usage }, options);
     return { accountId, ...usage, fromCache: false };
   } catch (caught) {
-    // A rejected access token on its own means "verify": renewing may fix it.
+    // A rejected access token on its own means "repair": renewing may fix it.
     // Once the provider has refused this login's refresh token too, nothing
     // but signing in again will, and the card should say so.
     let error = caught;
@@ -407,7 +407,7 @@ export async function fetchCodexUsage(auth, options = {}) {
   const response = await providerFetch(options.usageUrl || CODEX_USAGE_URL, { headers }, options);
   if (!response.ok) {
     if (response.status === 401) {
-      const error = new Error('OpenAI rejected this Codex access token. Verify the login or sign in again.');
+      const error = new Error('OpenAI rejected this Codex access token. Repair the login or sign in again.');
       error.code = 'AUTH_REJECTED';
       throw error;
     }

@@ -26,7 +26,7 @@ function loginNeedsUpdate(account, activeId, hasAuthenticationIssue = false) {
 }
 
 // "Sign in again" when the refresh token itself was refused, saying why where
-// the provider did; "verify" when only an access token was turned away and a
+// the provider did; "repair" when only an access token was turned away and a
 // renewal may still fix it.
 const SIGN_IN_REASONS = {
   refresh_token_expired: 'Login expired · sign in again',
@@ -326,7 +326,7 @@ function summarizeAccounts(rows) {
     const health = row.health?.id;
     if (health === 'healthy' || health === 'low-quota') summary.ready++;
     else if (health === 'usage-stale') summary.stale++;
-    else if (health === 'needs-sign-in' || health === 'needs-verification') summary.signIn++;
+    else if (health === 'needs-sign-in' || health === 'needs-repair') summary.signIn++;
     else if (health === 'limit-reached' || health === 'subscription-unavailable') summary.blocked++;
     else summary.unknown++;
   }
@@ -407,7 +407,7 @@ class AccountsWebview {
         import: 'turntrail.importAccount',
         refresh: 'turntrail.refreshAccountQuota',
         useReset: 'turntrail.useCodexReset',
-        retry: 'turntrail.retryAccountLogin',
+        repair: 'turntrail.repairAccountLogin',
         toggleMaintenance: 'turntrail.toggleAccountMaintenance',
         runMaintenance: 'turntrail.runAccountMaintenance',
         keepClaudeChats: 'turntrail.keepClaudeChats',
@@ -884,7 +884,7 @@ function renderRow(row) {
   else if (row.usageAccessFailure === 'USAGE_PERMISSION_DENIED') {
     status = 'Claude denied access to subscription usage (USAGE_PERMISSION_DENIED)';
   }
-  else if (row.requiresRevalidation) status = row.active ? 'Selected login needs repair' : 'Login needs verification';
+  else if (row.requiresRevalidation) status = row.active ? 'Selected login needs repair' : 'Login needs repair';
   else if (!row.signedIn) status = row.active ? 'Selected login needs sign-in' : 'Not signed in';
   else if (row.renewingLogin) status = 'Waiting for Claude Code to renew this login';
   else if (row.error) status = esc(row.error);
@@ -953,7 +953,7 @@ function renderRow(row) {
       // A rejected access token may only need renewing; a refused refresh
       // token needs a new sign-in.
       (row.requiresRevalidation && !row.requiresSignIn
-        ? act('retry', 'Try again', 'primary')
+        ? act('repair', 'Repair login', 'primary')
         : authenticationFailure
         ? act('signin', 'Sign in again', 'primary')
         : (usageAccessFailure

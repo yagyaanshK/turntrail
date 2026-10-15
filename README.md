@@ -411,7 +411,7 @@ cancelled when its window closes. Each attempt is recorded in `accounts/<id>/ren
 how it ended (renewed, refused, failed or interrupted) and short fingerprints of the tokens, never
 the tokens themselves. A refresh token the provider has refused is never sent again; the account
 shows why it needs a new sign-in (expired, renewed by another copy, or signed out and signed in
-elsewhere, as Codex distinguishes them) instead of asking you to verify it. One account that needs a
+elsewhere, as Codex distinguishes them) instead of offering to repair it. One account that needs a
 sign-in no longer stops maintenance of the others. See [docs/LOGIN_RENEWAL.md](docs/LOGIN_RENEWAL.md)
 for when a login is renewed and what a limits refresh does.
 

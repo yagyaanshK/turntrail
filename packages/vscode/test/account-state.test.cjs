@@ -45,7 +45,7 @@ test('account health distinguishes authentication, quota, and stale evidence', (
   const now = Date.parse('2026-09-07T12:00:00.000Z');
   const fresh = '2026-09-07T11:59:00.000Z';
   assert.equal(classifyAccountHealth({ signedIn: false }, { now }).id, 'needs-sign-in');
-  assert.equal(classifyAccountHealth({ signedIn: true, requiresRevalidation: true }, { now }).id, 'needs-verification');
+  assert.equal(classifyAccountHealth({ signedIn: true, requiresRevalidation: true }, { now }).id, 'needs-repair');
   assert.equal(classifyAccountHealth({ signedIn: true, usageAccessFailure: 'USAGE_PERMISSION_DENIED' }, { now }).id, 'subscription-unavailable');
   assert.equal(classifyAccountHealth({ signedIn: true, limitReached: true, remaining: 80 }, { now }).id, 'limit-reached');
   assert.equal(classifyAccountHealth({ signedIn: true, remaining: 12, fetchedAt: fresh }, { now }).id, 'low-quota');
@@ -61,7 +61,7 @@ test('only confirmed authentication failures receive explicit sign-in labels', (
   assert.equal(authenticationFailureLabel('AUTH_REJECTED'), 'Authentication rejected (AUTH_REJECTED)');
 });
 
-test('a dead login says why it needs a new sign-in, as Codex does; a rejected one says verify', () => {
+test('a dead login says why it needs a new sign-in, as Codex does; a rejected one says repair', () => {
   assert.equal(authenticationFailureLabel('AUTH_EXPIRED', 'refresh_token_invalidated'), 'Signed out or signed in elsewhere · sign in again');
   assert.equal(authenticationFailureLabel('AUTH_EXPIRED', 'refresh_token_reused'), 'Login renewed by another copy · sign in again');
   assert.equal(authenticationFailureLabel('AUTH_EXPIRED', 'refresh_token_expired'), 'Login expired · sign in again');

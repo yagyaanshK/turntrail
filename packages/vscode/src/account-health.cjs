@@ -8,12 +8,12 @@ const HEALTH = Object.freeze({
   unavailable: { id: 'usage-unavailable', label: 'Usage unavailable', tone: 'warn', selectionRank: 1 },
   exhausted: { id: 'limit-reached', label: 'Limit reached', tone: 'crit', selectionRank: 0 },
   subscription: { id: 'subscription-unavailable', label: 'Subscription unavailable', tone: 'crit', selectionRank: 0 },
-  verification: { id: 'needs-verification', label: 'Verification required', tone: 'crit', selectionRank: 0 },
+  repair: { id: 'needs-repair', label: 'Repair required', tone: 'crit', selectionRank: 0 },
   signin: { id: 'needs-sign-in', label: 'Sign in required', tone: 'crit', selectionRank: 0 }
 });
 
 function classifyAccountHealth(row, options = {}) {
-  if (row?.requiresRevalidation) return HEALTH.verification;
+  if (row?.requiresRevalidation) return HEALTH.repair;
   if (row?.requiresSignIn || !row?.signedIn) return HEALTH.signin;
   if (row?.usageAccessFailure) return HEALTH.subscription;
   if (row?.limitReached || row?.remaining === 0) return HEALTH.exhausted;
