@@ -123,10 +123,15 @@ responsive; a long history takes about a minute. An index of hourly totals is ke
 `~/.turntrail/usage/`, so later reads cover only lines appended since, and while the panel is open
 it updates a few seconds after an agent writes.
 
+Codex compresses chats it has stopped using into `rollout-*.jsonl.zst` files. Turntrail reads those
+the same as the others, decompressing them in memory; it never changes, moves or unpacks the file.
+The first scan after Codex compresses old chats reads all of them once, which takes longer.
+
 Codex owns its transcript format and has been reshaping how it stores chats. If it ever keeps some
 in a form Turntrail cannot read, they are not quietly left out: **Usage Statistics**, the
 **Sessions** list and `turntrail usage` say how many Codex chats are affected and why. That is a
-rollout in another file format (for example compressed), a rollout that does not start with
+rollout in a file format Turntrail does not know, a chat Codex compressed when the editor's Node.js
+is too old to decompress it (zstd needs Node.js 22.15 or later), a rollout that does not start with
 Codex's session record, or a chat in Codex's own `state_*.sqlite` index with no rollout file. The
 checks read only the first bytes of each file, and the index check skips chats Codex has not
 written to yet. It needs Node's built-in SQLite, which current editors include; elsewhere the file

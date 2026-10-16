@@ -7,6 +7,7 @@ import { claudeHome, defaultClaudeHome } from './accounts/claude.js';
 import { codexHome, defaultCodexHome } from './accounts/codex.js';
 import { readCodexThreadNames } from './adapters/codex-index.js';
 import { checkCodexStorage } from './adapters/codex-storage.js';
+import { isZstdTranscript, openTranscript, zstdSupported } from './adapters/common.js';
 
 // Token use, read from the transcripts the agents already write.
 //
@@ -104,11 +105,21 @@ export async function scanUsage(options = {}) {
       stats.files++;
       let entry = index.files[file.path];
       if (entry && entry.size === file.size && entry.mtimeMs === file.mtimeMs) continue;
-      if (!entry || file.size < entry.offset || entry.agent !== location.agent) {
+      // A compressed chat is rewritten whole rather than appended to, so a
+      // changed one is read again from the start.
+      if (!entry || file.size < entry.offset || entry.agent !== location.agent || isZstdTranscript(file.path)) {
         entry = { agent: location.agent, account: location.account, offset: 0, state: {}, buckets: {} };
       }
       entry.account = location.account;
-      const consumed = await readFrom(file.path, entry.offset, (line) => parseLine(entry, line));
+      let consumed;
+      try {
+        consumed = await readFrom(file.path, entry.offset, (line) => parseLine(entry, line));
+      } catch (error) {
+        // A compressed chat that will not decompress is left out, and the
+        // storage check names it, rather than stopping the whole scan.
+        if (!isZstdTranscript(file.path) || options.signal?.aborted) throw error;
+        continue;
+      }
       stats.read++;
       stats.bytes += consumed;
       entry.offset += consumed;
@@ -138,7 +149,16 @@ export async function scanUsage(options = {}) {
   return index;
 }
 
-async function listJsonl(dir, options, out = []) {
+// Transcripts under a folder, including the ones Codex compressed. A chat with
+// both copies, which happens only for a moment while Codex compresses or
+// restores it, counts once, from the plain one.
+async function listJsonl(dir, options) {
+  const files = await listTranscripts(dir, options);
+  const plain = new Set(files.map((file) => file.path));
+  return files.filter((file) => !isZstdTranscript(file.path) || !plain.has(file.path.slice(0, -'.zst'.length)));
+}
+
+async function listTranscripts(dir, options, out = []) {
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
@@ -147,8 +167,8 @@ async function listJsonl(dir, options, out = []) {
   }
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) await listJsonl(full, options, out);
-    else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+    if (entry.isDirectory()) await listTranscripts(full, options, out);
+    else if (entry.isFile() && (entry.name.endsWith('.jsonl') || (zstdSupported && isZstdTranscript(entry.name)))) {
       try {
         const stat = await fs.stat(full);
         out.push({ path: full, size: stat.size, mtimeMs: stat.mtimeMs });
@@ -163,13 +183,14 @@ async function listJsonl(dir, options, out = []) {
 // Reads complete lines from `start` and returns how many bytes they covered,
 // so a line still being written is left for the next pass. Lines over 8 MiB
 // (Codex compaction records) are passed over without being held in memory;
-// none of them carry usage.
+// none of them carry usage. A compressed chat is always read from the start,
+// decompressed in memory and never written.
 async function readFrom(file, start, onLine) {
   let consumed = 0;
   let parts = [];
   let partBytes = 0;
   let skipping = false;
-  const stream = createReadStream(file, { start });
+  const stream = isZstdTranscript(file) ? openTranscript(file) : createReadStream(file, { start });
   for await (const chunk of stream) {
     let from = 0;
     while (from < chunk.length) {

@@ -2,10 +2,51 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createReadStream } from 'node:fs';
+import { pipeline, Transform } from 'node:stream';
+import zlib from 'node:zlib';
 import { omitInlineImages } from '../media.js';
 
 export function homePath(...parts) {
   return path.join(os.homedir(), ...parts);
+}
+
+// Codex compresses chats it has not touched for a while, rewriting
+// rollout-*.jsonl as rollout-*.jsonl.zst. Inside is the same JSONL. Turntrail
+// only ever opens such a file for reading and decompresses it in memory: it
+// never rewrites, renames, decompresses on disk or locks a chat file, which
+// stays Codex's to manage. zstd arrived in Node 22.15; on an older runtime these
+// files are left to the storage check, which reports them.
+export const ZSTD_TRANSCRIPT_SUFFIX = '.jsonl.zst';
+export const zstdSupported = typeof zlib.createZstdDecompress === 'function';
+
+export function isZstdTranscript(filePath) {
+  return String(filePath).toLowerCase().endsWith(ZSTD_TRANSCRIPT_SUFFIX);
+}
+
+// The file's bytes, read-only, decompressed when it is a .jsonl.zst. Destroying
+// the returned stream closes the file.
+export function openTranscript(filePath, options = {}) {
+  if (!isZstdTranscript(filePath)) return createReadStream(filePath, { signal: options.signal });
+  if (!zstdSupported) {
+    throw new Error(`This Node.js ${process.versions.node} cannot decompress ${path.basename(filePath)}; zstd needs Node.js 22.15 or later.`);
+  }
+  return pipeline(createReadStream(filePath, { signal: options.signal }), zlib.createZstdDecompress(), nonEmpty(filePath), () => {});
+}
+
+// Node's zstd decoder does not complain about a damaged or cut-off file; it
+// just produces nothing. A compressed chat always holds at least its session
+// metadata, so nothing at all means it could not be read.
+function nonEmpty(filePath) {
+  let bytes = 0;
+  return new Transform({
+    transform(chunk, encoding, done) {
+      bytes += chunk.length;
+      done(null, chunk);
+    },
+    flush(done) {
+      done(bytes > 0 ? null : new Error(`${path.basename(filePath)} could not be decompressed; the file may be damaged.`));
+    }
+  });
 }
 
 export const DEFAULT_MAX_DISCOVERY_FILES = 5000;
@@ -127,7 +168,7 @@ const OVERSIZED_LINE_HEAD_CHARS = 512;
 export async function readJsonlObjects(filePath, onObject, options = {}) {
   const maxLineChars = positiveLimit(options.maxLineChars, DEFAULT_MAX_JSONL_LINE_CHARS);
   const lineFilter = typeof options.lineFilter === 'function' ? options.lineFilter : undefined;
-  const stream = createReadStream(filePath, { encoding: 'utf8', signal: options.signal });
+  const stream = openTranscript(filePath, options).setEncoding('utf8');
   let lineNumber = 0;
   // The pieces of the line in progress, joined once when its newline arrives.
   // Appending every chunk to one string instead re-copies all of it each time,
@@ -325,18 +366,13 @@ function positiveLimit(value, fallback) {
 // lands mid-line simply yields fewer objects, which is fine: this only ever
 // enriches a label.
 export async function readLastJsonlObjects(filePath, limit = 40, maxBytes = 256 * 1024, options = {}) {
-  let handle;
   try {
     options.signal?.throwIfAborted();
-    handle = await fs.open(filePath, 'r');
-    const { size } = await handle.stat();
-    const start = Math.max(0, size - maxBytes);
-    const length = size - start;
-    if (length <= 0) return [];
-
-    const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, start);
+    const { buffer, start } = isZstdTranscript(filePath)
+      ? await decompressedTail(filePath, maxBytes, options)
+      : await fileTail(filePath, maxBytes);
     options.signal?.throwIfAborted();
+    if (buffer.length === 0) return [];
 
     const lines = buffer.toString('utf8').split(/\r?\n/);
     // When the window started mid-file the first line is a fragment - and may
@@ -357,7 +393,40 @@ export async function readLastJsonlObjects(filePath, limit = 40, maxBytes = 256 
     return objects.reverse();
   } catch {
     return [];
-  } finally {
-    await handle?.close().catch(() => {});
   }
+}
+
+// The last `maxBytes` of a file, and where they start.
+async function fileTail(filePath, maxBytes) {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - maxBytes);
+    const buffer = Buffer.alloc(size - start);
+    if (buffer.length > 0) await handle.read(buffer, 0, buffer.length, start);
+    return { buffer, start };
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
+// The same for a compressed transcript, which cannot be read from the end: it
+// is decompressed as a stream, keeping only the last `maxBytes`. Codex
+// compresses only chats it has stopped using, so this runs once per file and
+// the discovery cache answers after that.
+async function decompressedTail(filePath, maxBytes, options) {
+  const kept = [];
+  let keptBytes = 0;
+  let dropped = 0;
+  for await (const chunk of openTranscript(filePath, options)) {
+    kept.push(chunk);
+    keptBytes += chunk.length;
+    while (kept.length > 1 && keptBytes - kept[0].length >= maxBytes) {
+      keptBytes -= kept[0].length;
+      dropped += kept.shift().length;
+    }
+  }
+  const all = Buffer.concat(kept);
+  const cut = Math.max(0, all.length - maxBytes);
+  return { buffer: all.subarray(cut), start: dropped + cut };
 }

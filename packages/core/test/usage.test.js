@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import zlib from 'node:zlib';
 import { estimateUsageCost, projectLimitWindow, readUsageIndex, scanUsage, summarizeUsage, usageInsights } from '../src/index.js';
 
 delete process.env.CLAUDE_CONFIG_DIR;
@@ -155,6 +156,46 @@ test('a record too long to hold is passed over without breaking the lines after 
   ].join('\n') + '\n');
   const total = summarizeUsage(await scanUsage(options), { now: options.now }).totals.codex;
   assert.equal(total.output, 5);
+});
+
+test('a chat Codex compressed counts the same, once, and is left as it was', { skip: !zlib.zstdCompressSync && 'zstd is not available in this runtime' }, async () => {
+  const { codex, options } = await sandbox();
+  const text = jsonl([
+    codexMeta(),
+    { timestamp: at(2), type: 'turn_context', payload: { model: 'gpt-6.1-sol', cwd: 'D:\\work' } },
+    tokenCount(at(2), u(1_000, 400, 50), u(1_000, 400, 50)),
+    tokenCount(at(1), u(3_000, 1_000, 150), u(2_000, 600, 100))
+  ]);
+  const plain = path.join(codex, 'rollout-a.jsonl');
+  await fs.writeFile(plain, text);
+  let index = await scanUsage(options);
+  const expected = summarizeUsage(index, { now: options.now }).totals.codex;
+  assert.equal(expected.calls, 2);
+
+  // While Codex compresses it both copies exist: still one chat.
+  const packed = `${plain}.zst`;
+  await fs.writeFile(packed, zlib.zstdCompressSync(Buffer.from(text)));
+  index = await scanUsage({ ...options, index });
+  assert.deepEqual(summarizeUsage(index, { now: options.now }).totals.codex, expected);
+
+  // Then only the compressed one.
+  await fs.rm(plain);
+  const bytes = await fs.readFile(packed);
+  const { mtimeMs } = await fs.stat(packed);
+  index = await scanUsage({ ...options, index });
+  assert.deepEqual(Object.keys(index.files), [packed]);
+  assert.deepEqual(summarizeUsage(index, { now: options.now }).totals.codex, expected);
+  index = await scanUsage({ ...options, index });
+  assert.deepEqual(summarizeUsage(index, { now: options.now }).totals.codex, expected, 'an unchanged compressed chat is not counted twice');
+  assert.deepEqual(await fs.readFile(packed), bytes);
+  assert.equal((await fs.stat(packed)).mtimeMs, mtimeMs);
+  assert.deepEqual(await fs.readdir(codex), ['rollout-a.jsonl.zst']);
+
+  // One that will not decompress is left out without stopping the scan.
+  await fs.writeFile(path.join(codex, 'rollout-b.jsonl.zst'), Buffer.from([0x28, 0xb5, 0x2f, 0xfd]));
+  index = await scanUsage({ ...options, index });
+  assert.deepEqual(Object.keys(index.files), [packed]);
+  assert.deepEqual(summarizeUsage(index, { now: options.now }).totals.codex, expected);
 });
 
 test('summaries split usage into the windows a burn rate needs', async () => {

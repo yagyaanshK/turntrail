@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import zlib from 'node:zlib';
 import { checkCodexStorage, discoverNativeSessions, importNativeSession, initStore, readAllTurns } from '../src/index.js';
 
 // One fixture per layout Codex has written, so a change for a new Codex build
@@ -129,6 +130,66 @@ for (const name of Object.keys(ERAS)) {
     assert.deepEqual(await checkCodexStorage({ homes: [home] }), [], 'a readable era raises no alarm');
   });
 }
+
+// Codex compresses chats it has stopped using into rollout-*.jsonl.zst. Every
+// JSONL layout must read the same that way, and Turntrail must leave the file
+// exactly as Codex wrote it.
+const NO_ZSTD = !zlib.zstdCompressSync && 'zstd is not available in this runtime';
+
+async function untouched(file) {
+  return { bytes: await fs.readFile(file), mtimeMs: (await fs.stat(file)).mtimeMs, beside: (await fs.readdir(path.dirname(file))).sort() };
+}
+
+for (const name of Object.keys(ERAS).filter((key) => ERAS[key].file.endsWith('.jsonl'))) {
+  test(`Codex ${name}, compressed by Codex: the session is listed, described and imported, and the file is not touched`, { skip: NO_ZSTD }, async (t) => {
+    const { root, home, options, fixture } = await era(t, name);
+    const plain = path.join(options.sessionsDir, fixture.file);
+    const packed = `${plain}.zst`;
+    await fs.writeFile(packed, zlib.zstdCompressSync(await fs.readFile(plain)));
+    await fs.rm(plain);
+    const before = await untouched(packed);
+
+    const listed = await discoverNativeSessions('codex', options);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].path, packed);
+    assert.equal(listed[0].title, fixture.title);
+    assert.equal(listed[0].latest, fixture.latest);
+
+    await importNativeSession(root, 'codex', { ...options, last: true, all: true });
+    const contents = (await readAllTurns(root)).map((turn) => turn.content);
+    for (const expected of fixture.turns) {
+      assert.ok(contents.some((content) => content.includes(expected)), `imported turns include "${expected}"`);
+    }
+
+    assert.deepEqual(await checkCodexStorage({ homes: [home] }), [], 'a compressed chat raises no alarm');
+    assert.deepEqual(await untouched(packed), before);
+  });
+}
+
+test('a chat caught mid-compression, with both copies on disk, is listed once from the plain copy', { skip: NO_ZSTD }, async (t) => {
+  const { options, fixture } = await era(t, '2026 builds');
+  const plain = path.join(options.sessionsDir, fixture.file);
+  await fs.writeFile(`${plain}.zst`, zlib.zstdCompressSync(await fs.readFile(plain)));
+  // Other .zst files are not chats.
+  await fs.writeFile(path.join(options.sessionsDir, 'cache.zst'), zlib.zstdCompressSync(Buffer.from('{}')));
+
+  const listed = await discoverNativeSessions('codex', options);
+  assert.deepEqual(listed.map((session) => session.path), [plain]);
+});
+
+test('a compressed chat that will not decompress is named, and the others still list', { skip: NO_ZSTD }, async (t) => {
+  const { home, options, fixture } = await era(t, '2026 builds');
+  const broken = path.join(options.sessionsDir, 'rollout-2026-10-14T02-00-00-broken.jsonl.zst');
+  await fs.writeFile(broken, Buffer.from([0x28, 0xb5, 0x2f, 0xfd]));
+  const errors = [];
+
+  const listed = await discoverNativeSessions('codex', { ...options, onDiscoveryError: (error) => errors.push(error.path) });
+  assert.deepEqual(listed.map((session) => session.title), [fixture.title]);
+  assert.deepEqual(errors, [broken]);
+  const [problem] = await checkCodexStorage({ homes: [home] });
+  assert.equal(problem.reason, 'unrecognised');
+  assert.match(problem.message, /rollout-.*-broken\.jsonl\.zst/);
+});
 
 test('a session resumed after a Codex upgrade is described by the requests in both layouts', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-codex-resumed-'));

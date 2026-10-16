@@ -3,7 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { readJsonlObjects } from '../src/adapters/common.js';
+import zlib from 'node:zlib';
+import { readJsonlObjects, readLastJsonlObjects } from '../src/adapters/common.js';
 import { codexLineWanted } from '../src/adapters/codex.js';
 
 async function tempFile(content) {
@@ -66,4 +67,32 @@ test('Codex records the adapter never uses are recognised from the line head', (
   assert.equal(codexLineWanted(line({ type: 'event_msg', payload: { type: 'something_new' } })), true);
   // A message quoting one of the skipped names is a message.
   assert.equal(codexLineWanted(line({ type: 'response_item', payload: { type: 'message', role: 'user', content: '"type":"compacted"' } })), true);
+});
+
+test('a compressed transcript reads the same from the start and from the end, and is left as it was', { skip: !zlib.zstdCompressSync && 'zstd is not available in this runtime' }, async () => {
+  const records = Array.from({ length: 300 }, (_, index) => ({ n: index, text: `record ${index} ${'é'.repeat(index % 7)}` }));
+  const text = records.map((record) => JSON.stringify(record)).join('\n') + '\n';
+  const plain = await tempFile(text);
+  const packed = `${plain}.zst`;
+  await fs.writeFile(packed, zlib.zstdCompressSync(Buffer.from(text)));
+  await fs.utimes(packed, new Date('2025-10-02T21:01:00Z'), new Date('2025-10-02T21:01:00Z'));
+  const before = { bytes: await fs.readFile(packed), mtimeMs: (await fs.stat(packed)).mtimeMs };
+
+  const all = [];
+  await readJsonlObjects(packed, (object) => all.push(object));
+  assert.deepEqual(all, records);
+
+  const first = [];
+  await readJsonlObjects(packed, (object) => (first.push(object), first.length < 3));
+  assert.deepEqual(first, records.slice(0, 3), 'stopping early closes the file');
+
+  // A window that starts mid-line drops the fragment, exactly as for a plain file.
+  for (const window of [200, 1000, 64 * 1024]) {
+    assert.deepEqual(await readLastJsonlObjects(packed, 50, window), await readLastJsonlObjects(plain, 50, window), `window ${window}`);
+  }
+  assert.deepEqual(await readLastJsonlObjects(packed, 5), records.slice(-5));
+
+  assert.deepEqual(await fs.readFile(packed), before.bytes, 'the compressed file is not rewritten');
+  assert.equal((await fs.stat(packed)).mtimeMs, before.mtimeMs, 'nor touched');
+  assert.deepEqual((await fs.readdir(path.dirname(packed))).sort(), ['records.jsonl', 'records.jsonl.zst'], 'and nothing is written beside it');
 });

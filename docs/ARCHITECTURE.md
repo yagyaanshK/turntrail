@@ -107,6 +107,7 @@ Codex:
 ```text
 ~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl
 ~/.codex/archived_sessions/rollout-*.jsonl
+~/.codex/sessions/.../rollout-*.jsonl.zst          (compressed by Codex, 2026)
 ~/.codex/sessions/rollout-<date>-<id>.json      (TypeScript CLI, 2025)
 ```
 
@@ -120,6 +121,17 @@ layout in one place (`normalizeCodexRecord`), following Codex's own rollout writ
 | Rust 0.2 to 0.30 | JSONL: a bare `{id, timestamp, instructions, git}` line, bare response items, `{record_type: "state"}` snapshots. The folder comes from the `<environment_context>` the model was sent. |
 | Rust 0.31 to 2025 | JSONL with every record wrapped as `{timestamp, type, payload}`; each request appears as both `event_msg/user_message` and a `response_item`. |
 | 2026 builds | As above with an `ordinal` per record, `token_usage_record`, `world_state` and `item_completed`, and no `event_msg/user_message`: requests exist only as response items. |
+
+Codex builds from October 2026 (0.162 on the machine this was measured on) compress chats they have
+stopped using: a background job rewrites `rollout-*.jsonl` as `rollout-*.jsonl.zst`, a zstd stream
+of the same JSONL. Turntrail reads these with Node's built-in `zlib` zstd decoder (Node 22.15 and later), decompressing
+in memory as it streams. It never writes, renames, decompresses on disk or locks a chat file: the
+file belongs to Codex, which may be compressing or restoring it at the same moment. While that
+happens both copies can exist, and the plain one is used. Node's decoder returns nothing rather
+than an error for a damaged file, so a compressed chat that yields no bytes is reported as
+unreadable. A compressed file cannot be read from the end, so the latest-request preview
+decompresses it whole; that happens once per file, since Codex never appends to one. On a runtime
+without zstd the files are not read and the storage check says why.
 
 Requests are read from the `user_message` events up to the last one in a file and from response
 items after it, which covers all four and the boundary in a resumed session. Each layout has a

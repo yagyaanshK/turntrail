@@ -10,11 +10,13 @@ import {
   pathsOverlap,
   cachedDiscovery,
   importSignature,
+  isZstdTranscript,
   readFirstJsonlObjects,
   readJsonlObjects,
   readLastJsonlObjects,
   reportDiscoveryError,
-  sessionFileInfo
+  sessionFileInfo,
+  zstdSupported
 } from './common.js';
 import { readCodexThreadNames } from './codex-index.js';
 import { describeRequests, readLatestRequest } from './preview.js';
@@ -211,19 +213,29 @@ export function normalizeCodexRecord(record) {
   return record;
 }
 
-const ROLLOUT_EXTENSIONS = ['.jsonl', '.json'];
+// .zst is a chat Codex compressed (see openTranscript). Without a zstd decoder
+// those are left out here and reported by the storage check instead.
+const ROLLOUT_EXTENSIONS = zstdSupported ? ['.jsonl', '.json', '.zst'] : ['.jsonl', '.json'];
 const MAX_JSON_ROLLOUT_BYTES = 256 * 1024 * 1024;
 
 function isJsonRollout(filePath) {
   return path.extname(filePath).toLowerCase() === '.json';
 }
 
-// Every rollout under a folder: JSONL from the Rust CLI, and the TypeScript
-// CLI's .json documents, which are named rollout-*.json. Other .json files in
-// the tree are not sessions.
+// Every rollout under a folder: JSONL from the Rust CLI, the same compressed as
+// rollout-*.jsonl.zst, and the TypeScript CLI's .json documents, which are named
+// rollout-*.json. Other .json and .zst files in the tree are not sessions.
+// While Codex is compressing or restoring a chat both copies can exist for a
+// moment; the plain one is the one Codex is using, so the chat counts once.
 async function listCodexRollouts(dir, options) {
   const files = await listSessionFiles(dir, { ...options, extensions: ROLLOUT_EXTENSIONS });
-  return files.filter((file) => !isJsonRollout(file.path) || /^rollout-/i.test(path.basename(file.path)));
+  const plain = new Set(files.map((file) => file.path));
+  return files.filter((file) => {
+    const name = path.basename(file.path);
+    if (isZstdTranscript(name)) return /^rollout-/i.test(name) && !plain.has(file.path.slice(0, -'.zst'.length));
+    if (path.extname(name).toLowerCase() === '.zst') return false;
+    return !isJsonRollout(file.path) || /^rollout-/i.test(name);
+  });
 }
 
 // The TypeScript CLI's one-document rollout, as the records a JSONL rollout of
@@ -579,6 +591,6 @@ async function latestCodexRequest(filePath, options) {
 }
 
 function sessionIdFromCodexPath(filePath) {
-  const base = path.basename(filePath).replace(/\.jsonl?$/i, '');
+  const base = path.basename(filePath).replace(/\.(jsonl\.zst|jsonl|json)$/i, '');
   return base.replace(/^rollout-/, '');
 }

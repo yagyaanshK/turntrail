@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import zlib from 'node:zlib';
 import { checkCodexStorage, listSessionIndex } from '../src/index.js';
 
 async function codexHome(t) {
@@ -34,18 +35,27 @@ test('a Codex home with only readable rollouts reports nothing', async (t) => {
 
 test('rollouts in another format, or that do not start with session metadata, are named', async (t) => {
   const { home, day } = await codexHome(t);
-  await fs.writeFile(path.join(day, 'rollout-2026-10-14T01-00-00-a.jsonl.zst'), Buffer.from([0x28, 0xb5, 0x2f, 0xfd]));
-  await fs.writeFile(path.join(day, 'rollout-2026-10-14T01-00-01-b.jsonl.zst'), Buffer.from([0x28, 0xb5, 0x2f, 0xfd]));
+  await fs.writeFile(path.join(day, 'rollout-2026-10-14T01-00-00-a.jsonl.gz'), Buffer.from([0x1f, 0x8b]));
+  await fs.writeFile(path.join(day, 'rollout-2026-10-14T01-00-01-b.jsonl.gz'), Buffer.from([0x1f, 0x8b]));
   await fs.writeFile(path.join(day, 'rollout-2026-10-14T01-00-02-c.jsonl'), '{"page":1,"items":[]}\n');
 
   const problems = await checkCodexStorage({ homes: [home] });
   const format = problems.find((problem) => problem.reason === 'format');
   const unrecognised = problems.find((problem) => problem.reason === 'unrecognised');
   assert.equal(format.count, 2);
-  assert.match(format.message, /^2 Codex chats are stored in a format Turntrail cannot read yet \(rollout-.*\.jsonl\.zst\)/);
+  assert.match(format.message, /^2 Codex chats are stored in a format Turntrail cannot read yet \(rollout-.*\.jsonl\.gz\)/);
   assert.match(format.message, /left out of Sessions and Usage.*github\.com\/yagyaanshK\/turntrail\/issues/);
   assert.equal(unrecognised.count, 1);
   assert.match(unrecognised.message, /^1 Codex chat has a transcript that does not start the way Turntrail expects/);
+});
+
+test('chats Codex compressed are read, not reported', { skip: !zlib.zstdCompressSync && 'zstd is not available in this runtime' }, async (t) => {
+  const { home, day } = await codexHome(t);
+  await fs.writeFile(path.join(day, 'rollout-2026-10-14T01-00-00-a.jsonl.zst'), zlib.zstdCompressSync(Buffer.from(`${meta('a')}\n`)));
+  await fs.writeFile(path.join(day, 'rollout-2026-10-14T01-00-01-b.jsonl.zst'), zlib.zstdCompressSync(Buffer.from('{"page":1}\n')));
+  const problems = await checkCodexStorage({ homes: [home] });
+  assert.deepEqual(problems.map((problem) => [problem.reason, problem.count]), [['unrecognised', 1]]);
+  assert.match(problems[0].message, /-b\.jsonl\.zst/);
 });
 
 test('chats in Codex\'s own index without a rollout file are named, but new or empty ones are not', async (t) => {
@@ -67,6 +77,11 @@ test('chats in Codex\'s own index without a rollout file are named, but new or e
   insert.run('relative', 'sessions/2026/10/14/rollout-relative.jsonl', hourAgo, 1);
   insert.run('empty', path.join(day, 'rollout-empty.jsonl'), hourAgo, 0);
   insert.run('just-started', path.join(day, 'rollout-new.jsonl'), now / 1000 - 30, 1);
+  // Compressed since Codex indexed it, so it is on disk under another name.
+  if (zlib.zstdCompressSync) {
+    await fs.writeFile(path.join(day, 'rollout-packed.jsonl.zst'), zlib.zstdCompressSync(Buffer.from(`${meta('packed')}\n`)));
+    insert.run('packed', path.join(day, 'rollout-packed.jsonl'), hourAgo, 1);
+  }
   db.close();
   // An older index beside it is ignored in favour of the newest.
   await fs.writeFile(path.join(home, 'state_5.sqlite'), 'not a database');

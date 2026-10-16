@@ -1,12 +1,13 @@
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { homePath } from './common.js';
+import { homePath, isZstdTranscript, openTranscript, zstdSupported } from './common.js';
 
 // Codex chats that exist but that Turntrail cannot read.
 //
 // Turntrail reads every rollout layout Codex has written so far (see
-// normalizeCodexRecord). Codex owns that format and has been reshaping its storage (a SQLite thread index beside the rollouts, a
+// normalizeCodexRecord), including the rollout-*.jsonl.zst copies Codex makes of
+// chats it has stopped using (see openTranscript). Codex owns that format and has been reshaping its storage (a SQLite thread index beside the rollouts, a
 // "paginated" rollout migration, and announced cuts to what it keeps on disk).
 // Should a build compress rollouts or keep chats only in its database, those
 // chats would silently drop out of Sessions and Usage. This makes that loud.
@@ -16,13 +17,14 @@ import { homePath } from './common.js';
 export async function checkCodexStorage(options = {}) {
   const requested = options.homes || [defaultHome(), ...(options.extraHomes || [])];
   const homes = [...new Set(requested.map((home) => path.resolve(home)))];
-  const problems = { format: [], unrecognised: [], missing: [] };
+  const problems = { format: [], compressed: [], unrecognised: [], missing: [] };
 
   for (const home of homes) {
     for (const dir of ['sessions', 'archived_sessions']) {
       for (const file of await rolloutFiles(path.join(home, dir))) {
-        const kind = path.extname(file).toLowerCase();
-        if (kind !== '.jsonl' && kind !== '.json') problems.format.push(file);
+        const kind = isZstdTranscript(file) ? '.jsonl' : path.extname(file).toLowerCase();
+        if (isZstdTranscript(file) && !zstdSupported) problems.compressed.push(file);
+        else if (kind !== '.jsonl' && kind !== '.json') problems.format.push(file);
         else if (!(await startsLikeRollout(file, kind))) problems.unrecognised.push(file);
       }
     }
@@ -47,6 +49,11 @@ function describe(reason, files) {
   const example = path.basename(files[0]);
   if (reason === 'format') {
     return `${chats} ${count === 1 ? 'is' : 'are'} stored in a format Turntrail cannot read yet (${example}). ${REPORT}`;
+  }
+  if (reason === 'compressed') {
+    return `${chats} ${count === 1 ? 'is' : 'are'} compressed by Codex (${example}), and the Node.js ${process.versions.node} running Turntrail ` +
+      'cannot decompress them; that needs Node.js 22.15 or later. They are left out of Sessions and Usage until VS Code ' +
+      '(or the Node.js running the CLI) is updated.';
   }
   if (reason === 'unrecognised') {
     return `${chats} ${count === 1 ? 'has' : 'have'} a transcript that does not start the way Turntrail expects (${example}). ${REPORT}`;
@@ -83,19 +90,38 @@ const ROLLOUT_STARTS = {
 };
 
 async function startsLikeRollout(file, kind) {
-  let handle;
+  let head;
   try {
-    handle = await fs.open(file, 'r');
-    const buffer = Buffer.alloc(512);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    // An empty file is a rollout Codex has not written to yet, not a new format.
-    if (bytesRead === 0) return true;
-    const head = buffer.subarray(0, bytesRead).toString('utf8');
-    return ROLLOUT_STARTS[kind].some((pattern) => pattern.test(head));
-  } catch {
-    return true;
+    head = await readHead(file, 512);
+  } catch (error) {
+    // A file gone since the listing proves nothing. A compressed one that
+    // will not decompress is a chat Turntrail cannot read.
+    return error.code === 'ENOENT' || !isZstdTranscript(file);
+  }
+  // An empty file is a rollout Codex has not written to yet, not a new format.
+  if (head.length === 0) return true;
+  return ROLLOUT_STARTS[kind].some((pattern) => pattern.test(head.toString('utf8')));
+}
+
+// The first bytes of a rollout, decompressed if Codex compressed it. Read-only.
+async function readHead(file, bytes) {
+  if (isZstdTranscript(file)) {
+    const chunks = [];
+    let length = 0;
+    for await (const chunk of openTranscript(file)) {
+      chunks.push(chunk);
+      length += chunk.length;
+      if (length >= bytes) break;
+    }
+    return Buffer.concat(chunks).subarray(0, bytes);
+  }
+  const handle = await fs.open(file, 'r');
+  try {
+    const buffer = Buffer.alloc(bytes);
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+    return buffer.subarray(0, bytesRead);
   } finally {
-    await handle?.close().catch(() => {});
+    await handle.close().catch(() => {});
   }
 }
 
@@ -121,7 +147,7 @@ async function threadsWithoutRollout(home, options) {
       const updatedAt = Number(row.updated_at);
       if (Number.isFinite(updatedAt) && now - updatedAt < 300) continue;
       const file = path.isAbsolute(rollout) ? rollout : path.join(home, rollout);
-      if (!fsSync.existsSync(file)) missing.push(file);
+      if (!rolloutExists(file)) missing.push(file);
     }
     return missing;
   } catch {
@@ -134,6 +160,14 @@ async function threadsWithoutRollout(home, options) {
       // Already closed.
     }
   }
+}
+
+// Codex may still list a chat under the name it had before it was compressed,
+// or restored from compression, so either copy counts.
+function rolloutExists(file) {
+  if (fsSync.existsSync(file)) return true;
+  const other = isZstdTranscript(file) ? file.slice(0, -'.zst'.length) : `${file}.zst`;
+  return (isZstdTranscript(other) ? zstdSupported : true) && fsSync.existsSync(other);
 }
 
 function newestStateDatabase(home) {
