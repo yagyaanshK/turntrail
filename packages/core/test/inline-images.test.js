@@ -8,6 +8,7 @@ import { DEFAULT_MAX_IMPORTED_CHARS } from '../src/adapters/common.js';
 
 const PIXELS = 'iVBORw0KGgo' + 'A'.repeat(4000) + '=';
 const PNG = `data:image/png;base64,${PIXELS}`;
+const BARE_PIXELS = `${'A'.repeat(2000)}+/${'B'.repeat(2000)}==`;
 
 // A browser-driven Codex thread: screenshots come back inside tool outputs as
 // plain strings, not as image parts, so the adapter sees them as text.
@@ -50,6 +51,23 @@ test('inline images are replaced by a placeholder that says what was dropped', (
   assert.deepEqual(omitInlineImages(undefined), { content: '', omitted: 0 });
 });
 
+test('structured and bare base64 media are removed before they reach the ledger', () => {
+  const structured = JSON.stringify({
+    source: { type: 'base64', media_type: 'image/png', data: PIXELS },
+    file: { base64: PIXELS }
+  });
+  const fields = omitInlineImages(structured);
+  assert.equal(fields.omitted, 2);
+  assert.ok(!fields.content.includes(PIXELS));
+  assert.equal(fields.content.match(/omitted base64 payload/g)?.length, 2);
+
+  const bare = omitInlineImages(`Screenshot bytes: ${BARE_PIXELS}\nResult: rendered`);
+  assert.equal(bare.omitted, 1);
+  assert.ok(!bare.content.includes(BARE_PIXELS));
+  assert.match(bare.content, /omitted base64 blob/);
+  assert.match(bare.content, /Result: rendered/);
+});
+
 test('screenshots inside tool output strings never reach the ledger', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-inline-images-'));
   await initStore(root);
@@ -83,4 +101,64 @@ test('the import limit measures text and leaves room for a long browser session'
   const sessionsDir = await writeScreenshotThread(root);
   const imported = await importNativeSession(root, 'codex', { root, sessionsDir, last: true, maxImportedChars: 2000 });
   assert.ok(imported.turnCount >= 5);
+});
+
+test('Claude structured screenshots do not consume the transcript text limit', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-claude-inline-images-'));
+  await initStore(root);
+  const projectsDir = path.join(root, 'native-claude');
+  const projectDir = path.join(projectsDir, 'project');
+  await fs.mkdir(projectDir, { recursive: true });
+  const transcript = path.join(projectDir, 'screens.jsonl');
+  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: BARE_PIXELS } };
+  const events = [
+    {
+      type: 'user',
+      uuid: 'u1',
+      timestamp: '2026-10-18T12:00:00.000Z',
+      cwd: root,
+      sessionId: 'screens',
+      message: { role: 'user', content: [{ type: 'text', text: 'Compare these screenshots.' }, image] }
+    },
+    {
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: '2026-10-18T12:00:01.000Z',
+      cwd: root,
+      sessionId: 'screens',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', name: 'inspect_image', input: { path: 'screen.png' } },
+          { type: 'text', text: 'The second screenshot contains the completed form.' }
+        ]
+      }
+    },
+    {
+      type: 'attachment',
+      uuid: 'm1',
+      timestamp: '2026-10-18T12:00:02.000Z',
+      cwd: root,
+      sessionId: 'screens',
+      attachment: { prompt: [image], filename: 'screen.png' }
+    }
+  ];
+  await fs.writeFile(transcript, events.map((event) => JSON.stringify(event)).join('\n') + '\n', 'utf8');
+
+  const imported = await importNativeSession(root, 'claude', {
+    root,
+    projectsDir,
+    last: true,
+    maxImportedChars: 1500
+  });
+  assert.equal(imported.turnCount, 3);
+
+  const turns = await readAllTurns(root);
+  const text = turns.map((turn) => turn.content).join('\n');
+  assert.ok(!text.includes(BARE_PIXELS), 'bare Claude image bytes are not stored');
+  assert.match(text, /Compare these screenshots/);
+  assert.match(text, /Tool call: inspect_image/);
+  assert.match(text, /completed form/);
+  assert.match(text, /omitted base64 payload/);
+  assert.ok(turns.some((turn) => turn.metadata?.inlineImagesOmitted > 0));
 });

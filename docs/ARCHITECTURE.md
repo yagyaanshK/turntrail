@@ -292,9 +292,10 @@ Session files are written a line at a time rather than as one joined string.
 Inline media handling:
 
 - local image paths are shown as references when available
-- inline `data:image/...;base64` payloads are replaced with compact omission markers as each turn
-  is imported, wherever they appear, including inside tool-output strings that the adapters would
-  otherwise treat as text; the turn records how many were dropped in `metadata.inlineImagesOmitted`.
+- inline media payloads are replaced with compact omission markers as each turn is imported,
+  whether they are `data:image/...;base64` URLs, bare base64 strings, or current Claude structured
+  `data`/`base64` fields; the turn records how many were dropped in `metadata.inlineImagesOmitted`.
+  Surrounding text, tool calls, tool results, and local media references remain intact.
   A browser-driven Codex thread of 1.3 GB, 85% screenshots, comes to 77 MB of text this way, which
   is why the import ceiling is 128 MiB of text
 - long bare base64 blobs are replaced with compact omission markers

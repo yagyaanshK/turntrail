@@ -6,22 +6,40 @@ const INLINE_DATA_IMAGE_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\r
 const QUOTED_DATA_IMAGE_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=%_-]+/g;
 const JSON_BASE64_FIELD_RE = /(?:image|screenshot|data|bytes|base64)/i;
 
-// Inline image payloads are pixels, never text a receiving agent can use, and
+// Inline media payloads are bytes, never text a receiving agent can use, and
 // a browser-driven session can carry a gigabyte of them inside tool outputs.
-// They are dropped the moment a turn is imported, so the ledger never stores
-// them and the in-memory import limit measures text, not screenshots.
-export function omitInlineImages(content) {
-  let omitted = 0;
+// Claude records current screenshots as bare base64 in structured `data` and
+// `base64` fields, while older tools used data URLs or bare output strings.
+// Drop all three forms before the import limit measures the turn.
+export function omitInlineMedia(content) {
+  const stats = {
+    inlineImages: 0,
+    jsonFields: 0,
+    base64Tokens: 0
+  };
   let text = String(content || '');
   text = text.replace(QUOTED_DATA_IMAGE_RE, (match) => {
-    omitted++;
+    stats.inlineImages++;
     return `[Turntrail omitted inline base64 image: ${match.length} chars]`;
   });
   text = text.replace(INLINE_DATA_IMAGE_RE, (match) => {
-    omitted++;
+    stats.inlineImages++;
     return `[Turntrail omitted inline base64 image: ${match.length} chars]`;
   });
-  return { content: text, omitted };
+  text = replaceJsonBase64Fields(text, stats);
+  text = replaceLongBase64Tokens(text, stats);
+  return {
+    content: text,
+    omitted: stats.inlineImages + stats.jsonFields + stats.base64Tokens,
+    stats
+  };
+}
+
+// Kept as the public compatibility name introduced with the original image
+// sanitizer. It now recognizes the additional forms current Claude writes.
+export function omitInlineImages(content) {
+  const { content: sanitized, omitted } = omitInlineMedia(content);
+  return { content: sanitized, omitted };
 }
 
 export function sanitizeContentForHandoff(content) {
@@ -32,11 +50,11 @@ export function sanitizeContentForHandoff(content) {
     secrets: 0
   };
 
-  const images = omitInlineImages(content);
-  let text = images.content;
-  stats.inlineImages = images.omitted;
-  text = replaceJsonBase64Fields(text, stats);
-  text = replaceLongBase64Tokens(text, stats);
+  const media = omitInlineMedia(content);
+  let text = media.content;
+  stats.inlineImages = media.stats.inlineImages;
+  stats.jsonFields = media.stats.jsonFields;
+  stats.base64Tokens = media.stats.base64Tokens;
   const redacted = redactSecrets(text);
   text = redacted.content;
   stats.secrets = redacted.count;

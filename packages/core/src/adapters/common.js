@@ -4,7 +4,7 @@ import os from 'node:os';
 import { createReadStream } from 'node:fs';
 import { pipeline, Transform } from 'node:stream';
 import zlib from 'node:zlib';
-import { omitInlineImages } from '../media.js';
+import { omitInlineMedia } from '../media.js';
 
 export function homePath(...parts) {
   return path.join(os.homedir(), ...parts);
@@ -103,13 +103,13 @@ export function createBoundedTurnCollector(options = {}) {
     push(turn) {
       options.signal?.throwIfAborted();
       if (!turn) return;
-      // Every adapter's turns pass through here, so this is where inline
-      // image payloads leave: the ledger stores text, and the limit below
-      // counts text.
-      const images = omitInlineImages(turn.content);
-      if (images.omitted > 0) {
-        turn.content = images.content;
-        turn.metadata = { ...(turn.metadata || {}), inlineImagesOmitted: images.omitted };
+      // Every adapter's turns pass through here, so this is where encoded
+      // media payloads leave: the ledger stores text, and the limit below
+      // counts text rather than screenshots or other embedded bytes.
+      const media = omitInlineMedia(turn.content);
+      if (media.omitted > 0) {
+        turn.content = media.content;
+        turn.metadata = { ...(turn.metadata || {}), inlineImagesOmitted: media.omitted };
       }
       chars += String(turn.content || '').length;
       if (turns.length + 1 > maxTurns || chars > maxChars) {
