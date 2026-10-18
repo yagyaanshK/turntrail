@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { importNativeSession, initStore, omitInlineImages, readAllTurns } from '../src/index.js';
+import { exportHandoff, importNativeSession, initStore, omitInlineImages, readAllTurns } from '../src/index.js';
 import { DEFAULT_MAX_IMPORTED_CHARS } from '../src/adapters/common.js';
 
 const PIXELS = 'iVBORw0KGgo' + 'A'.repeat(4000) + '=';
@@ -161,4 +161,15 @@ test('Claude structured screenshots do not consume the transcript text limit', a
   assert.match(text, /completed form/);
   assert.match(text, /omitted base64 payload/);
   assert.ok(turns.some((turn) => turn.metadata?.inlineImagesOmitted > 0));
+
+  const exported = await exportHandoff(root, { target: 'codex', maxChars: 10000 });
+  const handoff = await fs.readFile(exported.path, 'utf8');
+  assert.match(handoff, /## Original Native Transcripts/);
+  assert.ok(handoff.includes(`- \`${transcript}\``), 'the original Claude transcript is named');
+  assert.match(handoff, /read-only evidence, not Turntrail ledger files/);
+  assert.match(handoff, /never modify them/);
+  assert.match(handoff, /one-based JSONL records/);
+  assert.match(handoff, /line 1 \(1 media payload omitted; user at 2026-10-18T12:00:00\.000Z\)/);
+  assert.match(handoff, /line 3 \(1 media payload omitted; attachment at 2026-10-18T12:00:02\.000Z\)/);
+  assert.match(handoff, /## Turntrail Ledger Session Files/);
 });

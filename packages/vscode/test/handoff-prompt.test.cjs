@@ -40,6 +40,7 @@ test('a handoff into a new chat tells it what to be called', () => {
   assert.equal(lines[2], 'This chat should be named "sorted inference (handoff)".');
   assert.equal(lines[4], `\`${HANDOFF}\``);
   assert.match(lines[6], /^Read the handoff before acting\./);
+  assert.match(lines[6], /read only that record when needed and never modify the provider-owned transcript/);
 });
 
 test('every handoff prompt leaves two decisions to the user', () => {

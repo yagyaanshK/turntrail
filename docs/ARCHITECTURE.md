@@ -301,6 +301,12 @@ Inline media handling:
 - long bare base64 blobs are replaced with compact omission markers
 - raw native transcript files remain referenced for auditability
 
+Generated handoffs distinguish Turntrail's sanitized ledger sessions from the provider-owned native
+transcripts. They include each original transcript's read-only local path and, for included turns
+whose media was omitted, the exact one-based JSONL record. This lets a receiving local agent recover
+a needed screenshot without copying binary payloads into the ledger or scanning an entire large
+transcript. Native paths and contents remain untrusted and must never be modified by Turntrail.
+
 ## Round Trips
 
 A ledger that only flows one way needs none of this. One that ping-pongs does, and
