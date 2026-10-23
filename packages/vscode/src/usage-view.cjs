@@ -170,7 +170,7 @@ function html(webview) {
      colour-blind separation is in the 6-8 band, legal with the segment gaps,
      legend, tooltip and table as second cues; two light slots are under 3:1,
      which the same text covers. */
-  /* The four parts: output, new input and re-sent context take three slots of
+  /* The four parts: output, other input and estimated reprocessing take three slots of
      the validated set; cache reads are neutral, the bulk that matters least. */
   :root {
     --p-output: #008300; --p-new: #4a3aa7; --p-resent: #e87ba4; --p-cache: #9a9a94;
@@ -251,7 +251,8 @@ function html(webview) {
   .bar-caption { color: var(--dim); font-size: 0.8em; margin-bottom: 4px; }
   .compose { display: flex; gap: 2px; height: 10px; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
   .parts { display: grid; gap: 4px; margin-bottom: 8px; }
-  .part { display: grid; grid-template-columns: 10px 1fr auto 42px; gap: 8px; align-items: baseline; font-size: 0.9em; }
+  .part { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 42px; gap: 8px; align-items: baseline; font-size: 0.9em; }
+  .part-name { overflow-wrap: anywhere; }
   .part .swatch { align-self: center; }
   .part-note { display: block; color: var(--dim); font-size: 0.85em; }
   .num { font-variant-numeric: tabular-nums; text-align: right; }
@@ -267,7 +268,7 @@ function html(webview) {
   details.section > summary::-webkit-details-marker { display: none; }
   details.section > summary::before { content: '\u25B8'; color: var(--dim); width: 10px; font-size: 0.85em; transition: transform 0.12s; }
   details.section[open] > summary::before { transform: rotate(90deg); }
-  .section-title { font-weight: 600; white-space: nowrap; }
+  .section-title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
   .gist { margin-left: auto; color: var(--dim); font-size: 0.88em; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .gist .warn, .warn { color: var(--vscode-editorWarning-foreground, #cca700); }
   .section-body { padding: 0 2px 12px; }
@@ -545,9 +546,9 @@ function limits(rows) {
 
 const PARTS = [
   { key: 'output', label: 'Output', color: 'var(--p-output)', note: 'what the agent wrote' },
-  { key: 'newInput', label: 'New input', color: 'var(--p-new)', note: 'your messages, files, tool results' },
-  { key: 'resent', label: 'Re-sent context', color: 'var(--p-resent)', note: 'the conversation sent again after the cache expired' },
-  { key: 'cacheRead', label: 'Cache reads', color: 'var(--p-cache)', note: 'the conversation re-read every turn' }
+  { key: 'newInput', label: 'Other input', color: 'var(--p-new)', note: 'uncached input outside the reprocessing estimate' },
+  { key: 'resent', label: 'Estimated reprocessed context', color: 'var(--p-resent)', note: 'possible repeated input; cache expiry is not confirmed' },
+  { key: 'cacheRead', label: 'Cache reads', color: 'var(--p-cache)', note: 'provider-reported cached input' }
 ];
 function rangeTotals(summary) {
   const sum = { total: 0, output: 0, newInput: 0, resent: 0, cacheRead: 0 };
@@ -612,10 +613,12 @@ function section(id, title, gist, body, defaultOpen) {
 
 function sessionsBlock(rows) {
   if (!rows || !rows.length) return '';
-  return '<div class="hint">Sessions used in the last 7 days, by the tokens one more turn re-reads. A new task is cheaper in a fresh session or a handoff.</div>' + rows.map(function (r) {
+  return '<div class="hint">Sessions used in the last 7 days, ranked by recorded input size on their last request. Future context and caching may differ; this does not measure cost or productivity.</div>' + rows.map(function (r) {
     const agent = AGENTS.find(function (a) { return a.id === r.agent; }) || AGENTS[0];
+    const request = r.lastRequest;
+    const split = request ? '<div class="session-meta">Cached ' + fmt(request.cachedInputTokens) + ' \u00B7 Uncached ' + fmt(request.uncachedInputTokens) + '</div>' : '';
     return '<div class="session"><div class="session-top"><span class="swatch ' + agent.cls + '" title="' + esc(agent.name) + '"></span>' +
-      '<span class="session-title">' + esc(r.title || r.project) + '</span><span class="num">' + fmt(r.perTurn) + ' a turn</span></div>' +
+      '<span class="session-title">' + esc(r.title || r.project) + '</span><span class="num">' + fmt(request ? request.inputTokens : r.perTurn) + ' input tokens</span></div>' + split +
       '<div class="session-meta">' + esc(agent.name) + (r.title ? ' \u00B7 ' + esc(r.project) : '') + ' \u00B7 active ' + esc(ago(r.lastActive)) + '</div></div>';
   }).join('');
 }
@@ -655,7 +658,7 @@ function render() {
   const chartBody = '<div class="controls">' +
       '<div class="segments" role="group" aria-label="Measure">' +
         '<button data-metric="total" aria-pressed="' + (metric !== 'work') + '" title="Everything processed, cache reads included">All tokens</button>' +
-        '<button data-metric="work" aria-pressed="' + (metric === 'work') + '" title="New input, re-sent context and output">Without cache reads</button>' +
+        '<button data-metric="work" aria-pressed="' + (metric === 'work') + '" title="Uncached input, cache writes and output; includes reprocessing">Without cache reads</button>' +
       '</div>' +
       '<div class="segments" role="group" aria-label="Split by">' +
         '<button data-split="agent" aria-pressed="' + (split === 'agent') + '">Agents</button>' +
@@ -671,8 +674,8 @@ function render() {
     atRisk ? '<span class="warn">\u26A0 ' + atRisk + ' will run out before reset</span>' : 'all on pace', limits(limitRows), atRisk > 0);
 
   const heavy = summary.heaviestSessions || [];
-  html += section('sessions', 'Heaviest recent sessions',
-    heavy.length ? esc((heavy[0].title || heavy[0].project).slice(0, 28)) + ' \u00B7 ' + fmt(heavy[0].perTurn) + ' a turn' : '', sessionsBlock(heavy), false);
+  html += section('sessions', 'Largest last-request context',
+    heavy.length ? esc((heavy[0].title || heavy[0].project).slice(0, 28)) + ' \u00B7 ' + fmt(heavy[0].perTurn) + ' input tokens' : '', sessionsBlock(heavy), false);
 
   const sum = rangeTotals(summary);
   const lead = AGENTS.slice().sort(function (a, b) {
@@ -693,9 +696,9 @@ function render() {
       (model.cost.unpriced.length ? '<div class="stat-sub">No price set for ' + esc(model.cost.unpriced.join(', ')) + '.</div>' : '') + '</div>', false);
   }
   html += section('about', 'What these numbers mean', '', '<div class="note">' +
-    '<p><b>Output</b> is what the agent wrote, reasoning included. <b>New input</b> is what it had not seen: your messages, files it read, tool results. ' +
-    '<b>Re-sent context</b> is the conversation sent again because the prompt cache had expired, usually after a break; little of it is new. ' +
-    '<b>Cache reads</b> are the conversation re-read from the cache on every turn: most of the total, far cheaper per token, and growing with the length of a session rather than with how much gets written.</p>' +
+    '<p><b>Output</b> is what the agent wrote, reasoning included. <b>Other input</b> is uncached input outside the reprocessing estimate; it can include new or repeated content. ' +
+    '<b>Estimated reprocessed context</b> is inferred from large requests with mostly uncached input and an earlier large request. New content can look similar. Gaps longer than five minutes are noted, but do not prove cache expiry. ' +
+    '<b>Cache reads</b> are input tokens the provider reports as served from cache. Idle time alone records no token usage; another request is needed.</p>' +
     '<p>Providers do not publish how subscription limits weigh these parts; <b>Limits at this pace</b> uses the usage they report. Counts come from the chats Claude Code and Codex write on this machine; nothing is sent anywhere.' +
     (summary.scannedAt ? ' Updated ' + new Date(summary.scannedAt).toLocaleTimeString() + '.' : '') + '</p></div>', false);
   root.innerHTML = html;

@@ -90,12 +90,10 @@ every model reply carries the provider's own usage figures. Nothing is sent anyw
 processed is split into four parts that add up to the total:
 
 - **Output**: what the agent wrote, reasoning included.
-- **New input**: what it had not seen: your messages, files it read, tool results.
-- **Re-sent context**: the conversation sent again because the prompt cache had expired, usually
-  after a break in a long session. Little of it is new.
-- **Cache reads**: the conversation re-read from the cache on every turn. This is most of the
-  total, far cheaper per token, and grows with the length of a session rather than with how much
-  is written.
+- **Other input**: uncached input outside the reprocessing estimate; it may be new or repeated.
+- **Estimated reprocessed context**: possible repeated input inferred from large, mostly uncached
+  requests with a prior large context. New content can look similar; a pause does not prove expiry.
+- **Cache reads**: input tokens the provider reports as served from the prompt cache.
 
 Providers do not publish how subscription limits weigh these parts, so the total is labelled as
 what was processed, not as what counts against a limit; the limit projections use the usage the
@@ -103,9 +101,10 @@ providers report. Gemini and Cursor transcripts carry no token counts, so they a
 
 The panel leads with one card: the total for the range, each agent's share, the four parts as a
 bar with their figures, and today's total and burn rate. Under it, **What stands out** appears only
-when the last week supports it: when re-sent context is 40% or more of an agent's input, saying
-whether it followed breaks or happened mid-session, and when cache reads are 80% or more of the
-total, naming the session that costs most to continue. Each comes with something to do.
+when the last week supports it: when estimated reprocessed context is 40% or more of an agent's
+uncached input, noting whether it followed gaps longer than five minutes, and when cache reads
+are 80% or more of the total, naming the largest last-request context. Timing cannot establish
+cache expiry. Idle time alone records no token usage.
 
 Everything else is in sections that show a one-line summary when closed and remember being
 opened. **Usage over time** is a stacked chart for 7, 30 or 90 days or **Max**, of all tokens or
@@ -113,8 +112,9 @@ without cache reads, split by **Agents** or **Models**, with a tooltip and a tab
 days it groups into weeks, over two years into months. By model it shows the four models with the
 most tokens in the range and folds the rest into "Other", each keeping its colour across ranges.
 **Limits at this pace** projects each account's quota windows from how fast each has been used so
-far, and opens itself when one will run out before it resets. **Heaviest recent sessions** lists
-chats used in the last week by the tokens one more turn re-reads. **By agent**, **Models**,
+far, and opens itself when one will run out before it resets. **Largest last-request context** lists
+chats used in the last week by recorded input size, including their cached/uncached split. This
+does not predict the next request or measure cost or productivity. **By agent**, **Models**,
 **Projects** and **Accounts** break the range down, and an optional estimated cost appears when
 `turntrail.usagePrices` gives prices per million tokens; Turntrail ships none.
 

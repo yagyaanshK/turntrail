@@ -301,7 +301,7 @@ test('day lists follow the calendar, not 24-hour steps', async () => {
   }
 });
 
-test('a call that re-caches the conversation is re-sent context, and a pause before it is noted', async () => {
+test('reprocessing is estimated within prior context and observed pauses are noted', async () => {
   const { claude, options } = await sandbox();
   const reply = (id, minutesAgo, usage) => claudeReply(id, new Date(NOON.getTime() - minutesAgo * 60000).toISOString(), usage);
   await fs.writeFile(path.join(claude, 'long.jsonl'), jsonl([
@@ -309,7 +309,7 @@ test('a call that re-caches the conversation is re-sent context, and a pause bef
     // Normal turns: small new input on a large cached conversation.
     reply('a', 120, { input_tokens: 3, cache_creation_input_tokens: 2000, cache_read_input_tokens: 100000, output_tokens: 500 }),
     reply('b', 119, { input_tokens: 3, cache_creation_input_tokens: 3000, cache_read_input_tokens: 102000, output_tokens: 400 }),
-    // After a 60-minute break the cache has gone: the whole conversation is written again.
+    // A mostly uncached request after a 60-minute gap; the cause is unknown.
     reply('c', 59, { input_tokens: 3, cache_creation_input_tokens: 105000, cache_read_input_tokens: 0, output_tokens: 300 }),
     // Mid-session miss, no pause.
     reply('d', 58, { input_tokens: 3, cache_creation_input_tokens: 106000, cache_read_input_tokens: 0, output_tokens: 200 }),
@@ -318,15 +318,16 @@ test('a call that re-caches the conversation is re-sent context, and a pause bef
   ]));
   const summary = summarizeUsage(await scanUsage(options), { now: options.now, days: 7 });
   const t = summary.totals.claude;
-  assert.equal(t.resent, 105000 + 106000);
-  assert.equal(t.resentAfterPause, 105000);
-  assert.equal(t.newInput, 15 + 2000 + 3000 + 9000);
+  assert.equal(t.resent, 105003 + 105003);
+  assert.equal(t.resentAfterPause, 105003);
+  assert.equal(t.newInput, t.fresh + t.cacheWrite - t.resent);
   assert.equal(t.output, 1500);
   assert.equal(t.total, t.output + t.newInput + t.resent + t.cacheRead, 'the four parts add up to the total');
 
   const [session] = summary.heaviestSessions;
   assert.equal(session.title, 'Long <session>');
   assert.equal(session.perTurn, 9003, 'what the last call carried');
+  assert.deepEqual(session.lastRequest, { inputTokens: 9003, cachedInputTokens: 0, uncachedInputTokens: 9003 });
   assert.equal(session.calls, 5);
 });
 
@@ -338,14 +339,15 @@ test('insights speak only when the numbers support them', () => {
     codex: week({ total: 10e6, cacheRead: 9e6, newInput: 1e6, resent: 0 })
   }, [{ agent: 'claude', title: 'Big chat', project: 'p', perTurn: 872000 }]);
   assert.deepEqual(insights.map((i) => i.kind), ['resent', 'cacheReads']);
-  assert.match(insights[0].message, /^Re-sent context was 70% of Claude Code's input this week/);
-  assert.match(insights[0].advice, /after a break/);
-  assert.match(insights[1].message, /^90% of this week's tokens were cache reads/);
-  assert.match(insights[1].advice, /"Big chat", carries 872k tokens a turn/);
+  assert.match(insights[0].message, /^Estimated reprocessed context was 70% of Claude Code's input this week/);
+  assert.match(insights[0].advice, /followed gaps longer than five minutes/);
+  assert.match(insights[0].advice, /does not prove cache expiry/);
+  assert.match(insights[1].message, /^90% of this week's tokens were reported cache reads/);
+  assert.match(insights[1].advice, /"Big chat", contained 872k input tokens/);
 
   // Mid-session misses get different advice; small amounts say nothing.
   const midSession = usageInsights({ claude: week({ total: 20e6, cacheRead: 5e6, newInput: 3e6, resent: 7e6, resentAfterPause: 1e6 }) });
-  assert.match(midSession[0].advice, /mid-session/);
+  assert.match(midSession[0].advice, /without gaps longer than five minutes/);
   assert.deepEqual(usageInsights({ claude: week({ total: 2e6, cacheRead: 1e6, newInput: 1e5, resent: 9e5 }) }), []);
 });
 
@@ -356,4 +358,79 @@ test('heaviest sessions are the ones still in use this week', async () => {
   await fs.writeFile(path.join(claude, 'recent.jsonl'), jsonl([claudeReply('new', at(2), { ...big, cache_read_input_tokens: 100000 })]));
   const summary = summarizeUsage(await scanUsage(options), { now: options.now, days: 30 });
   assert.deepEqual(summary.heaviestSessions.map((s) => s.perTurn), [101003], 'the bigger session was last used 20 days ago');
+});
+
+test('large first requests are not inferred as reprocessing for either provider', async () => {
+  const { claude, codex, options } = await sandbox();
+  await fs.writeFile(path.join(claude, 'first.jsonl'), jsonl([
+    claudeReply('first', at(1), { input_tokens: 10000, cache_creation_input_tokens: 90000, output_tokens: 10 })
+  ]));
+  await fs.writeFile(path.join(codex, 'first.jsonl'), jsonl([
+    codexMeta(), tokenCount(at(1), u(100000, 0, 10), u(100000, 0, 10)),
+    // First per-response record replaces the same turn; rollback must restore prior context too.
+    { timestamp: at(1), type: 'token_usage_record', payload: { usage: u(100000, 0, 10) } }
+  ]));
+  const summary = summarizeUsage(await scanUsage(options), { now: options.now });
+  for (const agent of ['claude', 'codex']) {
+    assert.equal(summary.totals[agent].resent, 0);
+    assert.equal(summary.totals[agent].resentAfterPause, 0);
+    assert.equal(summary.totals[agent].calls, 1);
+    assert.equal(summary.totals[agent].total, 100010);
+  }
+});
+
+test('context growth is bounded by prior uncached overlap and small prior requests are ignored', async () => {
+  const { claude, options } = await sandbox();
+  await fs.writeFile(path.join(claude, 'growth.jsonl'), jsonl([
+    claudeReply('small', at(4), { input_tokens: 1000 }),
+    claudeReply('large', at(3), { input_tokens: 50000 }),
+    claudeReply('growth', at(2), { input_tokens: 200000, cache_read_input_tokens: 10000 })
+  ]));
+  const index = await scanUsage(options);
+  const total = summarizeUsage(index, { now: options.now }).totals.claude;
+  assert.equal(total.resent, 40000, 'only prior context outside current cache reads is estimated');
+  assert.equal(total.newInput, 211000);
+  assert.equal(total.total, 261000, 'raw provider counters are unchanged');
+  const unchanged = await scanUsage({ ...options, index, now: () => NOON.getTime() + 3600000 });
+  assert.equal(unchanged.lastScan.read, 0);
+  assert.equal(summarizeUsage(unchanged, { now: options.now }).totals.claude.total, total.total,
+    'idling alone cannot add token usage');
+});
+
+test('session ranking is independent of cache hits and retains cache splits across incremental scans', async () => {
+  const { claude, codex, options } = await sandbox();
+  const a = path.join(claude, 'cached.jsonl');
+  await fs.writeFile(a, jsonl([
+    claudeReply('cached', at(1), { input_tokens: 1000, cache_creation_input_tokens: 9000, cache_read_input_tokens: 140000 })
+  ]));
+  await fs.writeFile(path.join(codex, 'cold.jsonl'), jsonl([
+    codexMeta(), tokenCount(at(1), u(100000, 0, 0), u(100000, 0, 0))
+  ]));
+  await scanUsage(options);
+  const index = await scanUsage(options);
+  assert.equal(index.lastScan.read, 0, 'cache split survives reading the persisted index');
+  const rows = summarizeUsage(index, { now: options.now }).heaviestSessions;
+  assert.deepEqual(rows.map((r) => r.agent), ['claude', 'codex']);
+  assert.deepEqual(rows.map((r) => r.lastRequest), [
+    { inputTokens: 150000, cachedInputTokens: 140000, uncachedInputTokens: 10000 },
+    { inputTokens: 100000, cachedInputTokens: 0, uncachedInputTokens: 100000 }
+  ]);
+  await fs.appendFile(a, jsonl([claudeReply('cold', at(0), { input_tokens: 150000 })]));
+  const updated = summarizeUsage(await scanUsage(options), { now: options.now }).heaviestSessions[0];
+  assert.equal(updated.perTurn, rows[0].perTurn, 'cache expiry does not change input-size rank');
+  assert.deepEqual(updated.lastRequest, { inputTokens: 150000, cachedInputTokens: 0, uncachedInputTokens: 150000 });
+});
+
+test('older usage indexes are rebuilt rather than retaining unqualified estimates', async () => {
+  const { claude, options } = await sandbox();
+  await fs.writeFile(path.join(claude, 'one.jsonl'), jsonl([
+    claudeReply('first', at(1), { input_tokens: 100000 })
+  ]));
+  const index = await scanUsage(options);
+  index.version = 2;
+  await fs.writeFile(options.usageIndexPath, JSON.stringify(index));
+  assert.deepEqual((await readUsageIndex(options)).files, {});
+  const rebuilt = await scanUsage(options);
+  assert.equal(rebuilt.lastScan.read, 1);
+  assert.equal(summarizeUsage(rebuilt, { now: options.now }).totals.claude.resent, 0);
 });

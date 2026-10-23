@@ -19,15 +19,16 @@ import { isZstdTranscript, openTranscript, zstdSupported } from './adapters/comm
 //
 // The figures are counted in four parts, because they cost and count against
 // limits very differently:
-//   fresh       input the model had not seen before
+//   fresh       input not served from the prompt cache
 //   cacheWrite  input written into the prompt cache (Claude)
 //   cacheRead   input served from the prompt cache; each turn re-reads the
 //               conversation, so this is most of the raw total
 //   output      generated tokens, reasoning included
-// "Work" is fresh + cacheWrite + output: what a turn added.
+// "Work" is fresh + cacheWrite + output: tokens excluding cache reads,
+// including any previously processed input that missed the cache.
 
-// 2: buckets carry re-sent context, and files their context size and name.
-const INDEX_VERSION = 2;
+// 3: bounded reprocessing estimates and the last request's cache split.
+const INDEX_VERSION = 3;
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 const CLAUDE_RECENT_IDS = 64;
 export const USAGE_AGENTS = ['claude', 'codex'];
@@ -236,8 +237,7 @@ function localHourKey(iso) {
 //   [2] cacheRead   input served from the prompt cache
 //   [3] output
 //   [4] calls
-//   [5] resent      the part of fresh + cacheWrite that was the conversation
-//                   sent again because the cache missed, not new content
+//   [5] resent      estimated previously processed input, not a provider fact
 //   [6] resentAfterPause  the part of resent that followed a pause
 function addUsage(entry, at, model, usage, sign = 1) {
   const hour = localHourKey(at);
@@ -256,23 +256,27 @@ function addUsage(entry, at, model, usage, sign = 1) {
 
 const num = (value) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
 
-// A call re-sent the conversation when its cache missed: most of what it
-// carried had to be sent or cached again, though little of it was new. That
-// happens after a pause longer than the cache lives, and mid-session when
-// something changes what the cache can reuse. A small context is ignored:
-// there a miss costs little and the share means nothing.
+// Usage counters do not identify repeated content or explain cache misses.
+// Estimate reprocessing only with a prior large context and a majority miss,
+// bounded by the prior context not accounted for by current cache reads.
+// A pause is an observed interval, never proof of a provider's cache TTL.
 const RESEND_MIN_CONTEXT = 20000;
 const PAUSE_MS = 5 * 60 * 1000;
 
-function classifyResend(entry, at, context, uncached) {
+function classifyResend(entry, at, context, uncached, cached) {
   const time = Date.parse(at);
   const previous = entry.state.lastAt;
+  const previousContext = entry.lastContext || 0;
   entry.state.lastAt = Number.isFinite(time) ? time : previous;
   entry.lastContext = context;
+  entry.lastCachedInput = cached;
   entry.lastCallAt = at;
-  if (context < RESEND_MIN_CONTEXT || uncached <= context / 2) return { resent: 0, resentAfterPause: 0 };
-  const paused = !previous || !Number.isFinite(time) || time - previous > PAUSE_MS;
-  return { resent: uncached, resentAfterPause: paused ? uncached : 0 };
+  if (!previous || previousContext < RESEND_MIN_CONTEXT || context < RESEND_MIN_CONTEXT || uncached <= context / 2) {
+    return { resent: 0, resentAfterPause: 0 };
+  }
+  const resent = Math.min(uncached, Math.max(0, previousContext - cached));
+  const paused = Number.isFinite(time) && time - previous > PAUSE_MS;
+  return { resent, resentAfterPause: paused ? resent : 0 };
 }
 
 function parseLine(entry, line) {
@@ -321,7 +325,7 @@ function parseClaudeLine(entry, line) {
     cacheWrite,
     cacheRead,
     output: num(usage.output_tokens),
-    ...classifyResend(entry, event.timestamp, fresh + cacheWrite + cacheRead, cacheWrite)
+    ...classifyResend(entry, event.timestamp, fresh + cacheWrite + cacheRead, fresh + cacheWrite, cacheRead)
   });
 }
 
@@ -368,6 +372,7 @@ function parseCodexLine(entry, line) {
     if (!entry.state.records && previous && usage && sameCodexUsage(previous.usage, usage)) {
       addUsage(entry, previous.at, previous.model, previous.parts, -1);
       entry.state.lastAt = previous.lastAtBefore;
+      entry.lastContext = previous.lastContextBefore;
     }
     entry.state.records = true;
     entry.state.lastTurn = undefined;
@@ -383,6 +388,7 @@ function parseCodexLine(entry, line) {
   }
   if (!usage) return;
   const lastAtBefore = entry.state.lastAt;
+  const lastContextBefore = entry.lastContext;
   const parts = codexParts(entry, event.timestamp, usage);
   addUsage(entry, event.timestamp, entry.state.model, parts);
   if (!record) {
@@ -391,6 +397,7 @@ function parseCodexLine(entry, line) {
       model: entry.state.model,
       parts,
       lastAtBefore,
+      lastContextBefore,
       usage: { input_tokens: usage.input_tokens, cached_input_tokens: usage.cached_input_tokens, output_tokens: usage.output_tokens }
     };
   }
@@ -405,7 +412,7 @@ function codexParts(entry, at, usage) {
     cacheWrite: num(usage.cache_write_input_tokens),
     cacheRead: cached,
     output: num(usage.output_tokens),
-    ...classifyResend(entry, at, input, input - cached)
+    ...classifyResend(entry, at, input, input - cached, cached)
   };
 }
 
@@ -417,12 +424,12 @@ function sameCodexUsage(a, b) {
 // Summaries
 //
 // Four disjoint parts that add up to everything the agent processed:
-//   newInput   input the model had not seen: your messages, files, tool output
-//   resent     the conversation sent again after a cache miss
+//   newInput   other uncached input, after subtracting estimated reprocessing
+//   resent     estimated previously processed input, not confirmed overlap
 //   cacheRead  the conversation re-read from the prompt cache each turn
 //   output     what the model wrote, reasoning included
-// `total` is their sum. `work` (new input, cache writes and output) is kept
-// for callers that used it.
+// `total` is their sum. The legacy `work` field excludes cache reads; neither
+// it nor the residual `newInput` field measures useful work or productivity.
 
 const zero = () => ({ fresh: 0, cacheWrite: 0, cacheRead: 0, output: 0, calls: 0, work: 0, resent: 0, resentAfterPause: 0, newInput: 0, total: 0 });
 function accumulate(target, bucket) {
@@ -546,6 +553,11 @@ export function summarizeUsage(index, options = {}) {
         title: entry.title || undefined,
         project: projectName(entry.cwd),
         perTurn: entry.lastContext,
+        lastRequest: {
+          inputTokens: entry.lastContext,
+          cachedInputTokens: entry.lastCachedInput,
+          uncachedInputTokens: entry.lastContext - entry.lastCachedInput
+        },
         lastActive: entry.lastCallAt,
         calls: inRange.calls,
         total: inRange.total,
@@ -558,7 +570,7 @@ export function summarizeUsage(index, options = {}) {
     .filter((row) => row.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, limit);
-  // The chats that now cost the most to continue: what one more turn carries.
+  // Last observed input size, not next-request cost or useful work.
   const heaviestSessions = sessions.sort((a, b) => b.perTurn - a.perTurn).slice(0, options.sessionTop || 5);
   const models = ranked(byModel, options.modelTop || 50);
   return {
@@ -636,10 +648,10 @@ export function usageInsights(windows, heaviestSessions = []) {
         share: week.resent / input,
         afterPauseShare: afterPause,
         tokens: week.resent,
-        message: `Re-sent context was ${Math.round((100 * week.resent) / input)}% of ${names[agent]}'s input this week, not counting cache reads.`,
+        message: `Estimated reprocessed context was ${Math.round((100 * week.resent) / input)}% of ${names[agent]}'s input this week, excluding cache reads.`,
         advice: afterPause >= 0.5
-          ? 'Most of it came after a break in a long session, when the cache had expired and the whole conversation was sent again. Rather than resuming a long session after a break, start a fresh one or hand off.'
-          : 'Most of it happened mid-session, when the cache could not be reused. Starting a new session for a new task keeps each turn smaller.'
+          ? 'Most of this estimate followed gaps longer than five minutes. Timing does not prove cache expiry, and new content can resemble reprocessing. Consider a fresh session or a handoff when earlier context is no longer needed.'
+          : 'Most of this estimate occurred without gaps longer than five minutes. New content or changes to the prompt can resemble reprocessing; the counters do not establish the cause.'
       });
     }
   }
@@ -650,10 +662,10 @@ export function usageInsights(windows, heaviestSessions = []) {
     insights.push({
       kind: 'cacheReads',
       share: reads / all,
-      message: `${Math.round((100 * reads) / all)}% of this week's tokens were cache reads: every turn re-reads the whole conversation, however little is written.`,
+      message: `${Math.round((100 * reads) / all)}% of this week's tokens were reported cache reads.`,
       advice: top
-        ? `So a long session costs more with every turn. Your heaviest, ${top.title ? `"${top.title}"` : top.project}, carries ${formatCount(top.perTurn)} tokens a turn; a new task is cheaper in a fresh session.`
-        : 'So a long session costs more with every turn; a new task is cheaper in a fresh session.'
+        ? `The largest last-request context, ${top.title ? `"${top.title}"` : top.project}, contained ${formatCount(top.perTurn)} input tokens. Context size does not measure cost or productivity; future requests may use different context or caching.`
+        : 'Cache reads show context reuse. Token volume alone does not measure cost, subscription quota consumption or productivity.'
     });
   }
   return insights;

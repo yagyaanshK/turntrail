@@ -161,13 +161,15 @@ test('usage renders the total in four parts per agent, insights, and a breakdown
     byModel: [{ agent: 'codex', label: 'gpt-6.1-sol', total: 578e6, output: 2.6e6, resent: 9.1e6, calls: 3706 }],
     byProject: [],
     byAccount: [],
-    insights: [{ message: 'Re-sent context was 69% of input.', advice: 'Start a fresh session after a break.' }]
+    insights: [{ message: 'Estimated reprocessed context was 69% of input.', advice: 'A pause does not prove cache expiry.' }]
   };
   const text = renderUsage(summary);
   assert.match(text, /^Tokens processed, last 2 days \(2026-10-08 to 2026-10-09\)/);
   assert.match(text, /Claude Code\s+3\.5M\s+100M\s+1\.0M\s+2\.0M\s+3\.0M\s+94\.0M\s+165k/);
   assert.match(text, /Codex\s+3\.5M\s+100M\s+2\.0M\s+0\s+0\s+98\.0M\s+684k/);
-  assert.match(text, /\* Re-sent context was 69% of input\. Start a fresh session after a break\./);
+  assert.match(text, /\* Estimated reprocessed context was 69% of input\. A pause does not prove cache expiry\./);
+  assert.match(text, /Other input/);
+  assert.match(text, /Token volume does not measure cost or productivity/);
   assert.match(renderUsage(summary, 'model'), /gpt-6\.1-sol\s+Codex\s+578M\s+2\.6M\s+9\.1M\s+3706/);
   assert.match(renderUsage(summary, 'day'), /2026-10-08\s+100M\s+100M\s+1\.0M\s+2\.0M/);
   assert.match(renderUsage(summary, 'agent', { total: 12.345, priced: 1, unpriced: ['gpt-6.1-sol'] }), /US\$12\.35 across 1 model\(s\); no price for gpt-6\.1-sol/);

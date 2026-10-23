@@ -260,12 +260,10 @@ every model reply carries the provider's own usage figures. Nothing is sent anyw
 processed is split into four parts that add up to the total:
 
 - **Output**: what the agent wrote, reasoning included.
-- **New input**: what it had not seen: your messages, files it read, tool results.
-- **Re-sent context**: the conversation sent again because the prompt cache had expired, usually
-  after a break in a long session. Little of it is new.
-- **Cache reads**: the conversation re-read from the cache on every turn. This is most of the
-  total, far cheaper per token, and grows with the length of a session rather than with how much
-  is written.
+- **Other input**: uncached input outside the reprocessing estimate; it may be new or repeated.
+- **Estimated reprocessed context**: possible repeated input inferred from large, mostly uncached
+  requests with a prior large context. New content can look similar; a pause does not prove expiry.
+- **Cache reads**: input tokens the provider reports as served from the prompt cache.
 
 Providers do not publish how subscription limits weigh these parts, so the total is labelled as
 what was processed, not as what counts against a limit; the limit projections use the usage the
@@ -273,8 +271,10 @@ providers report. Gemini and Cursor transcripts carry no token counts, so they a
 
 The **Usage Statistics** panel leads with that total and its parts, points out what stands out in
 the last week with something to do about it, and keeps the details (usage over time by agent or
-model, limits at the current pace, the heaviest recent sessions, and breakdowns by agent, model,
+model, limits at the current pace, the largest last-request contexts, and breakdowns by agent, model,
 project and account) in sections that open on demand. `turntrail usage` prints the same figures.
+Session rankings show the last request's input size and cached/uncached split, not a prediction
+of the next request or a measure of productivity. Idle time alone records no token usage.
 If Codex stores some chats in a form Turntrail cannot read, the panel, the Sessions list and the CLI
 say how many and why instead of quietly leaving them out.
 See [VS Code](docs/VS_CODE.md#the-usage-statistics-panel) and [CLI](docs/CLI.md#usage).

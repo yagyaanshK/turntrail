@@ -159,16 +159,19 @@ every model reply carries the provider's own usage figures. Nothing is sent anyw
 processed is split into four parts that add up to the total:
 
 - **Output**: what the agent wrote, reasoning included.
-- **New input**: what it had not seen: your messages, files it read, tool results.
-- **Re-sent context**: the conversation sent again because the prompt cache had expired, usually
-  after a break in a long session. Little of it is new.
-- **Cache reads**: the conversation re-read from the cache on every turn. This is most of the
-  total, far cheaper per token, and grows with the length of a session rather than with how much
-  is written.
+- **Other input**: uncached input outside the reprocessing estimate; it may be new or repeated.
+- **Estimated reprocessed context**: possible repeated input inferred from large, mostly uncached
+  requests with a prior large context. New content can look similar; a pause does not prove expiry.
+- **Cache reads**: input tokens the provider reports as served from the prompt cache.
 
 Providers do not publish how subscription limits weigh these parts, so the total is labelled as
 what was processed, not as what counts against a limit; the limit projections use the usage the
 providers report. Gemini and Cursor transcripts carry no token counts, so they are not included.
+Idle time alone records no token usage. Token volume does not measure cost or productivity.
+The JSON fields `resent`, `resentAfterPause`, `newInput` and `perTurn` retain their names for
+compatibility: they represent an estimate, its portion after observed gaps, residual uncached
+input and last-request input size respectively. Session rows also expose `lastRequest` with
+`inputTokens`, `cachedInputTokens` and `uncachedInputTokens`.
 
 The default view gives each agent's total for today and the range, the range split into the four
 parts, and its burn rate per hour over the last 24 hours, followed by anything that stands out in

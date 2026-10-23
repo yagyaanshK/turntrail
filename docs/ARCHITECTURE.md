@@ -533,17 +533,23 @@ is counted per turn: `last_token_usage` on `token_count` events whose running to
 forked or resumed thread inherits its parent's. When a thread starts writing records part-way,
 the turn figure written just before the first record is the same turn and is taken back out.
 
-Each call is also classified. Its context is everything it carried (for Claude input, cache writes
-and cache reads; for Codex, input including cached). A call whose context is at least 20,000
-tokens and more than half of it uncached re-sent the conversation after a cache miss; that part is
-kept as `resent` in bucket slot 5, and in slot 6 as well when more than five minutes passed since
-the previous call in the file. The summary's four disjoint parts are then output, new input
-(uncached input and cache writes minus re-sent), re-sent and cache reads, and `total` is their sum.
-Each file also keeps the context of its latest call and its name (Claude's `aiTitle`, Codex's
-thread name from `session_index.jsonl`), which give `heaviestSessions`: sessions used in the last
-seven days by what one more turn re-reads. `usageInsights` turns the last week into at most two
-findings, each with advice, and only when the numbers cross a threshold (re-sent context at least
-40% of an agent's input; cache reads at least 80% of the total).
+Each call also receives a reprocessing estimate. Its context is everything it carried (for Claude
+input, cache writes and cache reads; for Codex, input including cached). Both it and the previous
+request must contain at least 20,000 input tokens, and the current request must be mostly uncached.
+The estimate is capped at the smaller of current uncached input and prior context minus current
+cache reads (floored at zero). The first recorded request is never flagged. Counters cannot prove
+content overlap: newly added content, prompt changes and other cache misses can look similar.
+The estimate is kept as `resent` in bucket slot 5, and in slot 6 as well when more than five minutes
+passed since the previous call. That interval is an observation, not a provider TTL or proof of
+expiry. The four parts are output, other input (uncached input and cache writes minus the estimate),
+estimated reprocessed context and cache reads; `total` remains their sum. Index version 3 rebuilds
+earlier estimates and records the last request's cache split. Provider token totals do not change.
+Each file also keeps its name (Claude's `aiTitle`, Codex's thread name from `session_index.jsonl`).
+`heaviestSessions` ranks sessions used in the last seven days by last recorded input size, retaining
+the legacy `perTurn` field and adding `lastRequest` with `inputTokens`, `cachedInputTokens` and
+`uncachedInputTokens`. This is not a forecast of the next request, expense or productivity.
+`usageInsights` qualifies its estimates and only appears above thresholds (estimated reprocessing
+at least one million tokens and 40% of uncached input; cache reads at least 80% of the total).
 
 `summarizeUsage` turns the index into per-agent windows (last hour, 24 hours, today, 7 and 30
 days), a burn rate, a daily series and rankings. `days: 'max'` runs from the first day with any

@@ -584,11 +584,11 @@ export function renderUsage(summary, by = 'agent', cost) {
     ]));
   } else if (by === 'model' || by === 'project' || by === 'account') {
     const rows = { model: summary.byModel, project: summary.byProject, account: summary.byAccount }[by];
-    table([by[0].toUpperCase() + by.slice(1), 'Agent', 'Tokens', 'Written', 'Re-sent', 'Calls'], rows.map((row) => [
+    table([by[0].toUpperCase() + by.slice(1), 'Agent', 'Tokens', 'Written', 'Est. reprocessed', 'Calls'], rows.map((row) => [
       row.label, AGENT_NAMES[row.agent] || row.agent, formatTokens(row.total), formatTokens(row.output), formatTokens(row.resent), row.calls
     ]));
   } else {
-    table(['Agent', 'Today', summary.range.max ? 'All time' : `${summary.days} days`, 'Output', 'New input', 'Re-sent', 'Cache reads', 'Per hour'], ['claude', 'codex'].map((agent) => [
+    table(['Agent', 'Today', summary.range.max ? 'All time' : `${summary.days} days`, 'Output', 'Other input', 'Est. reprocessed', 'Cache reads', 'Per hour'], ['claude', 'codex'].map((agent) => [
       AGENT_NAMES[agent],
       formatTokens(summary.windows[agent].today.total),
       formatTokens(sumOf(agent, 'total')),
@@ -605,8 +605,9 @@ export function renderUsage(summary, by = 'agent', cost) {
   }
   for (const insight of summary.insights || []) lines.push(`* ${insight.message} ${insight.advice}`, '');
   lines.push(
-    'Output is what the agent wrote. New input is what it had not seen. Re-sent is the conversation sent',
-    'again after the cache expired. Cache reads are the conversation re-read every turn.',
+    'Output is generated tokens. Other input is uncached input outside the reprocessing estimate.',
+    'Estimated reprocessed context may include new content; a pause does not prove cache expiry.',
+    'Cache reads are provider-reported cached input. Token volume does not measure cost or productivity.',
     ''
   );
   return lines.join('\n');

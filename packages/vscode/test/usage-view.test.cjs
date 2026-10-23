@@ -34,8 +34,8 @@ function summary(days = 7) {
     totals: { codex: parts(5e7), claude: parts(4e7) },
     windows: { codex: windows(), claude: windows() },
     burnPerHour: { codex: 100000, claude: 50000 },
-    heaviestSessions: [{ agent: 'claude', title: 'Long <chat>', project: 'turntrail', perTurn: 872000, lastActive: new Date().toISOString(), calls: 266, total: 1, resent: 0 }],
-    insights: [{ kind: 'resent', agent: 'claude', message: 'Re-sent context was 69% of input.', advice: 'Start a fresh session after a break.' }],
+    heaviestSessions: [{ agent: 'claude', title: 'Long <chat>', project: 'turntrail', perTurn: 872000, lastRequest: { inputTokens: 872000, cachedInputTokens: 800000, uncachedInputTokens: 72000 }, lastActive: new Date().toISOString(), calls: 266, total: 1, resent: 0 }],
+    insights: [{ kind: 'resent', agent: 'claude', message: 'Estimated reprocessed context was 69% of input.', advice: 'A pause does not prove cache expiry.' }],
     daily,
     byModel: [{ agent: 'codex', label: 'gpt-6.1-sol', work: 7e6, cacheRead: 1e8, total: 1.07e8, output: 7e5 }],
     byProject: [{ agent: 'claude', label: 'turntrail <x>', work: 5e6, cacheRead: 9e7, total: 9.5e7, output: 5e5 }],
@@ -228,8 +228,8 @@ test('the headline gives the total and its four parts, and insights sit right un
   const headline = html.slice(html.indexOf('class="card headline"'), html.indexOf('class="card insight"'));
   assert.ok(headline.includes('Tokens processed · 7 days'));
   assert.ok(headline.includes('<div class="big">'));
-  for (const label of ['Output', 'New input', 'Re-sent context', 'Cache reads']) assert.ok(headline.includes(label), label);
-  assert.ok(html.includes('class="card insight"><div class="insight-title">What stands out</div><div class="insight-item"><div class="insight-head">Re-sent context was 69% of input.</div>'));
+  for (const label of ['Output', 'Other input', 'Estimated reprocessed context', 'Cache reads']) assert.ok(headline.includes(label), label);
+  assert.ok(html.includes('class="card insight"><div class="insight-title">What stands out</div><div class="insight-item"><div class="insight-head">Estimated reprocessed context was 69% of input.</div>'));
   assert.ok(html.indexOf('card insight') < html.indexOf('data-section="time"'), 'insights come before the sections');
 });
 
@@ -241,7 +241,10 @@ test('details live in sections that show a gist when closed and remember being o
   const limits = html.slice(html.indexOf('data-section="limits"'), html.indexOf('data-section="sessions"'));
   assert.ok(limits.startsWith('data-section="limits" open>'), 'a limit at risk opens its section');
   assert.ok(limits.includes('⚠ 1 will run out before reset'));
-  assert.ok(html.includes('<details class="section" data-section="sessions"><summary><span class="section-title">Heaviest recent sessions</span><span class="gist">Long &lt;chat&gt; · 872k a turn</span>'));
+  assert.ok(html.includes('<details class="section" data-section="sessions"><summary><span class="section-title">Largest last-request context</span><span class="gist">Long &lt;chat&gt; · 872k input tokens</span>'));
+  assert.ok(html.includes('Cached 800k · Uncached 72k'));
+  assert.ok(html.includes('Future context and caching may differ'));
+  assert.ok(!html.includes('one more turn re-reads'));
   assert.ok(html.includes('<details class="section" data-section="models">'), 'other sections start closed');
   assert.ok(html.includes('data-section="about"'));
 });
