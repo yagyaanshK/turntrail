@@ -30,5 +30,8 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "chrome-remote-interface": "^0.33.3"
+  },
+  "overrides": {
+    "@azure/msal-node": "^7.1.1"
   }
 }
