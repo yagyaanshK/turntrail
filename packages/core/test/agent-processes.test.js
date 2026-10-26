@@ -350,3 +350,87 @@ test('stopping for a switch leaves guarded clients running', async (t) => {
   assert.deepEqual(killed, [2]);
   assert.deepEqual(result.remaining, []);
 });
+
+// `ps` names no executable, so without the resolution below every native
+// Codex and Claude Code on Linux and macOS was "unknown", hence unguarded,
+// and switching always asked to close them.
+const PS = (lines) => async () => ({ stdout: lines.join('\n') });
+
+test('Linux process listing names the running image through /proc, and keeps blocking when it cannot', async () => {
+  const links = {
+    '/proc/41/exe': '/home/u/.local/share/claude/versions/2.1.50',
+    '/proc/42/exe': '/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex',
+    '/proc/43/exe': '/opt/codex-old/codex (deleted)'
+  };
+  const asked = [];
+  const listed = await listAgentProcesses({
+    platform: 'linux',
+    execFile: PS([
+      '   41  4000 claude          claude --resume',
+      '   42  4100 codex           /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex app-server',
+      '   43  4000 codex           codex',
+      '   44  4000 codex           codex',
+      '   45  4200 codex-code-mode codex-code-mode-host --port 1',
+      '   46     1 bash            bash -lc claude'
+    ]),
+    readLink: async (link) => {
+      asked.push(link);
+      if (link in links) return links[link];
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    }
+  });
+  const byPid = Object.fromEntries(listed.map((item) => [item.pid, item]));
+  assert.equal(byPid[41].executablePath, links['/proc/41/exe']);
+  assert.equal(byPid[42].executablePath, links['/proc/42/exe']);
+  assert.equal(byPid[43].executablePath, '', 'a binary replaced underneath the process is not read');
+  assert.equal(byPid[44].executablePath, '', 'another user\'s process cannot be read');
+  assert.equal(byPid[45].name, 'codex-code-mode-host', 'the 15-character comm is completed from the command');
+  assert.equal(byPid[46].executablePath, '', 'only agent processes are resolved');
+  assert.deepEqual(asked.sort(), ['/proc/41/exe', '/proc/42/exe', '/proc/43/exe', '/proc/44/exe', '/proc/45/exe']);
+
+  const unguarded = await unguardedAgentProcesses('codex', listed, { scanAuthGuard: async () => true });
+  assert.deepEqual(unguarded.map((item) => item.pid), [43, 44]);
+});
+
+test('macOS process listing uses the command\'s own path, or finds a bare name on PATH', async () => {
+  // PATH is colon-separated there, so the lookup is checked against a virtual
+  // filesystem rather than a Windows temp directory.
+  const present = new Set(['/opt/homebrew/bin/claude']);
+  const listed = await listAgentProcesses({
+    platform: 'darwin',
+    env: { PATH: '/usr/local/bin:/opt/homebrew/bin' },
+    access: async (candidate) => {
+      if (!present.has(candidate)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+    execFile: PS([
+      '   51  5000 claude          claude',
+      '   52  5000 codex           /Applications/Codex.app/Contents/Resources/codex app-server',
+      '   53  5000 codex           ./codex',
+      '   54  5000 codex           codex'
+    ])
+  });
+  const byPid = Object.fromEntries(listed.map((item) => [item.pid, item]));
+  assert.equal(byPid[51].executablePath, '/opt/homebrew/bin/claude');
+  assert.equal(byPid[52].executablePath, '/Applications/Codex.app/Contents/Resources/codex');
+  assert.equal(byPid[53].executablePath, '', 'a relative path cannot be placed');
+  assert.equal(byPid[54].executablePath, '', 'a name not on PATH stays unknown');
+
+  // The resolved image is what the guard check reads.
+  const scanned = [];
+  const scanAuthGuard = async (file) => (scanned.push(file), true);
+  assert.deepEqual(await unguardedAgentProcesses('claude', listed, { scanAuthGuard }), []);
+  assert.deepEqual((await unguardedAgentProcesses('codex', listed, { scanAuthGuard })).map((item) => item.pid), [53, 54]);
+  assert.deepEqual(scanned, ['/opt/homebrew/bin/claude', '/Applications/Codex.app/Contents/Resources/codex']);
+});
+
+test('a current native client on Linux is proven guarded from its real image', async (t) => {
+  const { write, options } = await guardFixture(t);
+  const image = await write('codex-linux', `ELF ${CODEX_GUARD}`);
+  const listed = await listAgentProcesses({
+    platform: 'linux',
+    execFile: PS(['   61  6000 codex           codex app-server']),
+    readLink: async () => image
+  });
+  assert.deepEqual(await unguardedAgentProcesses('codex', listed, options), []);
+  await assert.doesNotReject(assertAgentStopped('codex', { ...options, allowGuarded: true, agentProcesses: listed }));
+});

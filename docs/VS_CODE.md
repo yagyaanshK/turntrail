@@ -307,7 +307,8 @@ If the provider is stopped, **Use this** switches immediately. Current Codex and
 builds can stay running through a switch: before refreshing, they re-read the login and back off if
 another process changed it, so they cannot write the previous account back. Turntrail confirms that
 for each running client by finding its vendor's guard in the client's own executable or script,
-checked once per file and remembered by size and date. Open Codex sessions keep the previous account
+checked once per file and remembered by size and date. On Linux the running executable is read from
+`/proc`; on macOS it is the command's own path, or the name found on `PATH`. Open Codex sessions keep the previous account
 until their window is reloaded or the Codex app restarts; Claude Code should pick up the new login
 by itself.
 

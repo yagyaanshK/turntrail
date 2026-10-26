@@ -25,7 +25,7 @@ export async function listAgentProcesses(options = {}) {
     const platform = options.platform || process.platform;
     const run = options.execFile || execFileAsync;
     if (platform === 'win32') return await listWindowsProcesses(run);
-    if (platform === 'linux' || platform === 'darwin') return await listPosixProcesses(run);
+    if (platform === 'linux' || platform === 'darwin') return await listPosixProcesses(run, platform, options);
     throw new Error(`unsupported platform ${platform}`);
   } catch (error) {
     throw new Error(`Could not inspect running agent processes: ${error.message}`);
@@ -245,18 +245,61 @@ async function listWindowsProcesses(run) {
   );
 }
 
-async function listPosixProcesses(run) {
+async function listPosixProcesses(run, platform, options = {}) {
   const { stdout } = await run('ps', ['-axo', 'pid=,ppid=,comm=,args='], {
     timeout: 10000,
     maxBuffer: 8 * 1024 * 1024
   });
-  return String(stdout || '')
+  const listed = String(stdout || '')
     .split(/\r?\n/)
     .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/))
     .filter(Boolean)
-    .map((match) =>
-      normalizeProcess({ pid: match[1], parentPid: match[2], name: match[3], commandLine: match[4] })
-    );
+    .map((match) => posixProcess(match[1], match[2], match[3], match[4]));
+  return Promise.all(listed.map(async (item) => ({ ...item, executablePath: await posixExecutablePath(item, platform, options) })));
+}
+
+// Linux cuts `comm` to 15 characters, so codex-code-mode-host lists as
+// codex-code-mode. The command's own first token still carries the full name.
+function posixProcess(pid, parentPid, comm, args) {
+  const item = normalizeProcess({ pid, parentPid, name: comm, commandLine: args });
+  const arg0 = path.posix.basename(commandTokens(item.commandLine)[0] || '');
+  if (comm.length === 15 && arg0.length > comm.length && arg0.startsWith(comm)) item.name = arg0;
+  return item;
+}
+
+// `ps` has no executable-path column, and the guard check needs the running
+// image to read. On Linux the kernel names it through /proc/<pid>/exe, which
+// is unreadable for another user's process and marked "(deleted)" once the
+// binary has been replaced underneath; both stay unknown, so the process keeps
+// blocking a switch. macOS has no /proc: there the command's first token is used
+// when it is an absolute path, or found on PATH when it is a bare name. A
+// relative path cannot be placed without the process's working directory, so
+// it stays unknown too. Only agent processes are resolved.
+async function posixExecutablePath(item, platform, options) {
+  if (!processMatches('codex', item) && !processMatches('claude', item)) return '';
+  if (platform === 'linux') {
+    const readLink = options.readLink || fs.readlink;
+    try {
+      const target = String(await readLink(`/proc/${item.pid}/exe`));
+      return target.endsWith(' (deleted)') ? '' : target;
+    } catch {
+      return '';
+    }
+  }
+  const arg0 = commandTokens(item.commandLine)[0] || '';
+  if (path.posix.isAbsolute(arg0)) return arg0;
+  if (!arg0 || arg0.includes('/')) return '';
+  const access = options.access || fs.access;
+  for (const dir of String((options.env || process.env).PATH || '').split(':').filter(Boolean)) {
+    const candidate = path.posix.join(dir, arg0);
+    try {
+      await access(candidate, fsSync.constants.X_OK);
+      return candidate;
+    } catch {
+      // Not in this directory.
+    }
+  }
+  return '';
 }
 
 function processMatches(provider, item) {
