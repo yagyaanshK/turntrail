@@ -55,10 +55,32 @@ test('every handoff prompt leaves two decisions to the user', () => {
   }
 });
 
-test('an unnamed source chat, whose title is only its opening request, names nothing', () => {
+test('an unnamed source chat is still named, from its opening request', () => {
+  // Without a name the receiving agent invents one, and the two chats stop
+  // sitting together. Most Codex threads are never named, so this is the rule
+  // rather than the exception.
   const prompt = handoffPrompt('codex', 'new', HANDOFF, undefined, { title: 'fix the failing build please', named: false });
-  assert.doesNotMatch(prompt, /should be named/);
+  assert.match(prompt, /^This chat should be named "fix the failing build please \(handoff\)"\.$/m);
   assert.doesNotMatch(handoffPrompt('codex', 'new', HANDOFF, undefined, undefined), /should be named/);
+  assert.doesNotMatch(handoffPrompt('codex', 'new', HANDOFF, undefined, { title: '', named: false }), /should be named/);
+});
+
+test('a long opening request is cut to a sidebar-sized name at a word boundary', () => {
+  const title = 'okay, now what about the planned feature for turntrail which\n\n  would ideally allow a user to use different subscription accounts in multiple windows?';
+  const prompt = handoffPrompt('claude', 'new', HANDOFF, undefined, { title, named: false });
+  assert.match(prompt, /^This chat should be named "okay, now what about the planned feature for turntrail… \(handoff\)"\.$/m);
+  // One long token is cut where it stands rather than dropped to nothing.
+  const word = handoffPrompt('claude', 'new', HANDOFF, undefined, { title: 'x'.repeat(80), named: false });
+  assert.match(word, new RegExp(`named "${'x'.repeat(60)}… \\(handoff\\)"`));
+});
+
+test('a chat that itself began with a handoff is named from its latest request, never from our prompt', () => {
+  const ownPrompt = 'Start a new session using this Turntrail handoff:\n\n`C:\\repo\\.turntrail\\exports\\x.md`';
+  const prompt = handoffPrompt('codex', 'new', HANDOFF, undefined, { title: ownPrompt, named: false, latest: 'tighten the retry loop' });
+  assert.match(prompt, /named "tighten the retry loop \(handoff\)"/);
+  assert.doesNotMatch(prompt, /Start a new session using this Turntrail handoff:\n\nThis chat should be named "Start/);
+  const legacy = 'Continue in this existing session using this Context Bridge handoff:';
+  assert.doesNotMatch(handoffPrompt('codex', 'new', HANDOFF, undefined, { title: legacy, named: false }), /should be named/);
 });
 
 test('a workspace still on the old ledger folder is told its real name', () => {

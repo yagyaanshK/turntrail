@@ -1309,7 +1309,9 @@ async function ledgerOriginChat(root, target) {
 // named it; a ledger-only row does not, so its manifest entry is consulted;
 // with neither, the source provider's latest imported chat is the one.
 async function handoffSourceChat(root, source, nativeSession, selected) {
-  if (nativeSession) return { title: nativeSession.title, named: Boolean(nativeSession.named) };
+  if (nativeSession) {
+    return { title: nativeSession.title, named: Boolean(nativeSession.named), latest: nativeSession.latest };
+  }
   if (selected?.ledgerSessionId) {
     try {
       const { readManifest } = await core();
@@ -1858,9 +1860,28 @@ function ledgerFolderOf(handoffPath) {
   return folder.length > 1 && folder.startsWith('.') ? folder : '.turntrail';
 }
 
+// A chat the agent never named is still named here, from its opening request:
+// without any name the receiving agent picks whatever it likes, and the two
+// chats no longer sit together. The request is cut to a sidebar-sized line.
+// A chat that was itself started from a handoff opens with our own prompt,
+// which names nothing, so its latest request stands in; failing that, no line.
+const MAX_CHAT_NAME_CHARS = 60;
+const OWN_PROMPT = /using this (?:Turntrail|Context Bridge) handoff/i;
+
 function handoffChatName(sourceChat) {
   const named = chatLabel(sourceChat);
-  return named ? `${named} (handoff)` : undefined;
+  if (named) return `${named} (handoff)`;
+  const request = [sourceChat?.title, sourceChat?.latest]
+    .map((text) => String(text || '').replace(/\s+/g, ' ').trim())
+    .find((text) => text && !OWN_PROMPT.test(text));
+  return request ? `${shortChatName(request)} (handoff)` : undefined;
+}
+
+function shortChatName(text) {
+  if (text.length <= MAX_CHAT_NAME_CHARS) return text;
+  const cut = text.slice(0, MAX_CHAT_NAME_CHARS);
+  const atWord = cut.lastIndexOf(' ');
+  return `${(atWord > MAX_CHAT_NAME_CHARS / 2 ? cut.slice(0, atWord) : cut).replace(/[\s,;:.!?-]+$/, '')}…`;
 }
 
 function handoffPrompt(target, mode, handoffPath, destination, sourceChat) {

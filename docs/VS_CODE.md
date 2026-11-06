@@ -393,9 +393,11 @@ standing instruction, and to wait for the answer. The handoff document's own rul
 
 A handoff into a **new** chat also says what that chat should be called, so the two conversations
 sit together in either app's sidebar: the source chat's own name with "(handoff)" appended, for
-example `This chat should be named "sorted inference (handoff)".` The line is only added when the
-source chat was actually named by its agent or by you; a chat known only by its opening request is
-not worth naming a second chat after.
+example `This chat should be named "sorted inference (handoff)".` A chat its agent never named,
+which is how most Codex threads are kept, is named from its opening request instead, cut to about
+sixty characters at a word boundary, so the receiving agent is never left to invent a name. A
+source chat that itself began with a handoff opens with Turntrail's own prompt, which names
+nothing, so its latest request is used; with neither, the line is left out.
 
 Screenshot payloads embedded in native transcripts are not pasted into the handoff. Turntrail keeps local image paths when available and replaces inline base64 image blobs with compact omission markers.
 
