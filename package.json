@@ -1,7 +1,7 @@
 {
   "name": "turntrail-workspace",
   "private": true,
-  "version": "0.18.28",
+  "version": "0.18.29",
   "description": "Vendor-neutral handoff layer for continuing developer agent sessions across Codex, Claude, and other tools.",
   "type": "module",
   "workspaces": [
@@ -32,6 +32,8 @@
     "chrome-remote-interface": "^0.33.3"
   },
   "overrides": {
-    "@azure/msal-node": "^7.1.1"
+    "@azure/msal-node": "^7.1.1",
+    "minimatch": "^11.0.1",
+    "qs": "^6.17.1"
   }
 }
