@@ -117,7 +117,17 @@ export const DEFAULT_MAX_LEDGER_CHARS = 128 * 1024 * 1024;
 export const DEFAULT_SESSION_PREVIEW_TURNS = 1000;
 export const DEFAULT_SESSION_PREVIEW_CHARS = 2 * 1024 * 1024;
 
-export async function readAllTurns(root, options = {}) {
+// What one export reads of the ledger.
+//
+// The ledger keeps every chat imported into the workspace, and two long Codex
+// threads are already more text than the ceiling, so a ceiling that refused
+// the read made the handoff fail exactly when the work had run longest. The
+// ceiling is now a window over the newest material instead: sessions are taken
+// newest import first, each whole while it fits, the first that does not is
+// kept from its newest turn back, and anything older is left unread. The
+// window bounds memory as the ceiling did, and what fell outside it is
+// returned beside the turns so the handoff can say so.
+export async function readLedgerTurns(root, options = {}) {
   const ledger = resolveLedger(root);
   const sessionFiles = await listFiles(path.join(ledger, 'sessions'), '.jsonl', {
     signal: options.signal,
@@ -125,26 +135,72 @@ export async function readAllTurns(root, options = {}) {
   });
   const maxTurns = positiveLimit(options.maxLedgerTurns, DEFAULT_MAX_LEDGER_TURNS);
   const maxChars = positiveLimit(options.maxLedgerChars, DEFAULT_MAX_LEDGER_CHARS);
+  const omitted = { turns: 0, chars: 0, sessions: 0, window: { maxTurns, maxChars } };
   const turns = [];
   let chars = 0;
-  for (const filePath of sessionFiles) {
+  let full = false;
+  for (const file of await newestImportsFirst(root, sessionFiles)) {
     options.signal?.throwIfAborted();
+    if (full) {
+      omitted.sessions += 1;
+      omitted.turns += file.turnCount;
+      continue;
+    }
+    // The newest turns of this session that still fit beside what is already
+    // read. A session's file is chronological, so the window slides from its
+    // front; the memory high-water mark stays at the window, not the file.
+    const own = [];
+    let ownChars = 0;
+    let dropped = 0;
     await readJsonlObjects(
-      filePath,
+      file.path,
       (turn) => {
-        chars += String(turn.content || '').length;
-        if (turns.length + 1 > maxTurns || chars > maxChars) {
-          throw new Error(
-            `Ledger exceeds the export safety limit (${maxTurns} turns or ${maxChars} content characters). ` +
-              'Raise maxLedgerTurns/maxLedgerChars deliberately or prune obsolete imported sessions.'
-          );
+        own.push(turn);
+        ownChars += String(turn.content || '').length;
+        while (own.length > 0 && (turns.length + own.length > maxTurns || chars + ownChars > maxChars)) {
+          const oldest = own.shift();
+          const size = String(oldest.content || '').length;
+          ownChars -= size;
+          omitted.chars += size;
+          dropped += 1;
         }
-        turns.push(turn);
       },
       options
     );
+    for (const turn of own) turns.push(turn);
+    chars += ownChars;
+    if (dropped > 0) {
+      omitted.turns += dropped;
+      omitted.sessions += 1;
+      full = true;
+    }
   }
-  return turns.sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
+  turns.sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
+  return { turns, omitted };
+}
+
+export async function readAllTurns(root, options = {}) {
+  return (await readLedgerTurns(root, options)).turns;
+}
+
+// Session files by when their chat was last imported, newest first, which is
+// the order the window keeps them in. The manifest knows the import time and
+// turn count; a file it does not list sorts last, by name.
+async function newestImportsFirst(root, sessionFiles) {
+  const manifest = await readManifest(root).catch(() => ({}));
+  const entries = new Map();
+  (manifest.sessions || []).forEach((entry, index) => {
+    const name = path.basename(String(entry?.path || ''));
+    if (name) entries.set(name, { importedAt: String(entry.importedAt || ''), index, turnCount: Number(entry.turnCount) || 0 });
+  });
+  return sessionFiles
+    .map((filePath) => {
+      const entry = entries.get(path.basename(filePath));
+      return { path: filePath, importedAt: entry?.importedAt || '', index: entry?.index ?? -1, turnCount: entry?.turnCount || 0 };
+    })
+    .sort((a, b) =>
+      b.importedAt.localeCompare(a.importedAt) || b.index - a.index || b.path.localeCompare(a.path)
+    );
 }
 
 export async function readSessionPreview(root, sessionId, options = {}) {

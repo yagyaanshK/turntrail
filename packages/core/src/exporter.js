@@ -2,7 +2,7 @@ import path from 'node:path';
 import {
   attachmentHash,
   latestSnapshot,
-  readAllTurns,
+  readLedgerTurns,
   readManifest,
   writeAttachment,
   writeExport
@@ -58,7 +58,7 @@ export async function inspectHandoff(root, options = {}) {
 async function buildHandoffPlan(root, options = {}) {
   const target = normalizeTarget(options.target || 'unknown');
   const manifest = await readManifest(root);
-  const allTurns = await readAllTurns(root, options);
+  const { turns: allTurns, omitted: unreadLedger } = await readLedgerTurns(root, options);
   const snapshot = await latestSnapshot(root);
 
   // Our own plumbing, recorded by the agent we handed off to: the prompt that
@@ -105,6 +105,7 @@ async function buildHandoffPlan(root, options = {}) {
     omittedTurns: selection.omittedTurns,
     collapsedDuplicates: deduped.removed,
     strippedPlumbing: stripped.removed,
+    unreadLedger,
     returning,
     // Summarize only what the target missed, so the return section speaks about
     // the other agent's work rather than repeating the whole session.
@@ -393,6 +394,7 @@ export function renderHandoff({
   omittedTurns = 0,
   collapsedDuplicates = 0,
   strippedPlumbing = 0,
+  unreadLedger,
   returning,
   returningSummary,
   origin,
@@ -455,6 +457,15 @@ export function renderHandoff({
   if (omittedTurns > 0) lines.push(`- Omitted turns due to budget: ${omittedTurns}`);
   if (collapsedDuplicates > 0) lines.push(`- Collapsed duplicate turns: ${collapsedDuplicates}`);
   if (strippedPlumbing > 0) lines.push(`- Dropped Turntrail handoff plumbing turns: ${strippedPlumbing}`);
+  if (unreadLedger?.sessions > 0) {
+    // The ledger outgrew what one export reads. The newest imports were kept
+    // whole, so the receiver has the current chat; this says what it lacks.
+    lines.push(
+      `- Oldest ledger turns left unread to fit the ledger window of ${unreadLedger.window.maxTurns} turns / ` +
+        `${unreadLedger.window.maxChars} chars: ${unreadLedger.turns} turns across ${unreadLedger.sessions} sessions; ` +
+        'the newest imports were kept whole'
+    );
+  }
   if (truncatedTurns > 0) lines.push(`- Truncated oversized turns: ${truncatedTurns} (~${truncatedChars} chars removed)`);
   lines.push('');
   lines.push(...renderOriginalNativeTranscripts(manifest, blocks));

@@ -298,6 +298,12 @@ Inline media handling:
   Surrounding text, tool calls, tool results, and local media references remain intact.
   A browser-driven Codex thread of 1.3 GB, 85% screenshots, comes to 77 MB of text this way, which
   is why the import ceiling is 128 MiB of text
+- one export reads the ledger through a window of the same size (50,000 turns or 128 MiB of
+  text), not against a ceiling that refuses: sessions are taken newest import first, each whole
+  while it fits, the first that does not is kept from its newest turn back, and older ones are
+  left unread. A workspace holding three long Codex threads, 197 million characters together,
+  used to fail its handoff at this point. The handoff's Ledger section says how many turns and
+  sessions fell outside the window
 - long bare base64 blobs are replaced with compact omission markers
 - raw native transcript files remain referenced for auditability
 

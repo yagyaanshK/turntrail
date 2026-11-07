@@ -5,10 +5,12 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   discoverNativeSessions,
+  exportHandoff,
   importTranscript,
   initStore,
   prepareTurns,
   readAllTurns,
+  readLedgerTurns,
   selectPreparedTurns,
   writeSession
 } from '../src/index.js';
@@ -111,7 +113,43 @@ test('streamed JSONL imports and ledger reads enforce bounded turn counts', asyn
     Array.from({ length: 4 }, (_, index) => ({ role: 'user', content: `stored ${index}`, timestamp: String(index) })),
     { sessionId: 'bounded-ledger' }
   );
-  await assert.rejects(() => readAllTurns(root, { maxLedgerTurns: 2 }), /Ledger exceeds the export safety limit/);
+  // The ledger window keeps the newest turns rather than refusing the read.
+  const windowed = await readAllTurns(root, { maxLedgerTurns: 2 });
+  assert.deepEqual(windowed.map((turn) => turn.content), ['stored 2', 'stored 3']);
+});
+
+test('a ledger past the window keeps the newest imports whole, clips the next, and reports the rest', async () => {
+  // The case from a real workspace: three imported Codex threads of 36, 77 and
+  // 83 million characters against a 128 MiB ceiling. The handoff used to fail
+  // outright; now the chat just imported is read whole, the one before it from
+  // its newest turn back, and the oldest not at all.
+  const root = await tempRoot();
+  await initStore(root);
+  const session = (id, prefix, count) => writeSession(
+    root,
+    Array.from({ length: count }, (_, index) => ({ role: 'user', content: `${prefix}${index}`, timestamp: `${prefix}${index}` })),
+    { sessionId: id }
+  );
+  await session('oldest', 'a', 4);
+  await session('middle', 'b', 4);
+  await session('newest', 'c', 4);
+
+  const { turns, omitted } = await readLedgerTurns(root, { maxLedgerChars: 12 });
+  assert.deepEqual(turns.map((turn) => turn.content), ['b2', 'b3', 'c0', 'c1', 'c2', 'c3']);
+  assert.deepEqual(omitted, { turns: 6, chars: 4, sessions: 2, window: { maxTurns: 50000, maxChars: 12 } });
+
+  const exported = await exportHandoff(root, { target: 'claude', maxLedgerChars: 12 });
+  const content = await fs.readFile(exported.path, 'utf8');
+  assert.match(content, /- Oldest ledger turns left unread to fit the ledger window of 50000 turns \/ 12 chars: 6 turns across 2 sessions; the newest imports were kept whole/);
+  assert.doesNotMatch(content, /a3/);
+  assert.match(content, /c3/);
+
+  // Within the window nothing is reported.
+  const whole = await readLedgerTurns(root);
+  assert.equal(whole.turns.length, 12);
+  assert.equal(whole.omitted.sessions, 0);
+  const fits = await fs.readFile((await exportHandoff(root, { target: 'claude' })).path, 'utf8');
+  assert.doesNotMatch(fits, /left unread/);
 });
 
 test('native discovery observes cancellation before walking provider storage', async () => {
