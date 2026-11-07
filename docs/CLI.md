@@ -89,6 +89,12 @@ When a Claude Code session launched background agents, importing it splices each
 report in right after the turn that launched it, so the handoff carries what the agents found.
 `import-native --subagent-transcripts` splices the agents' whole recordings instead.
 
+A chat the agent has compacted is imported from its last compaction point: for Codex the user
+requests it retained and everything since, for Claude Code the summary it wrote and everything
+since. That is what the agent itself still holds, and it keeps a long thread's import to its live
+part; the native file keeps every turn and the handoff names the line the import began at.
+`import-native --whole-thread` imports from the top instead.
+
 ## `run`
 
 Launch Claude, Codex, Gemini CLI, or Cursor Agent, then import the native transcript file changed during that run.

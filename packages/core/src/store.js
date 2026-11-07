@@ -101,6 +101,9 @@ export async function writeSession(root, turns, options = {}) {
     sourceSize: Number.isFinite(options.sourceSize) ? options.sourceSize : undefined,
     sourceMtimeMs: Number.isFinite(options.sourceMtimeMs) ? options.sourceMtimeMs : undefined,
     importSignature: options.importSignature || undefined,
+    // Where in the native file the import began when it did not begin at the
+    // top: the line of the compaction it started from, and how many there were.
+    importedFrom: options.importedFrom || undefined,
     // Which chat in the agent's own app this came from, so a handoff can name
     // the one to return to rather than leaving you to find it.
     nativeSessionId: options.nativeSessionId,

@@ -540,7 +540,13 @@ function renderOriginalNativeTranscripts(manifest, blocks) {
     const nativeId = session.nativeSessionId
       ? `; native session ${safeMetadataValue(session.nativeSessionId)}`
       : '';
-    lines.push(`- ${safeMetadataValue(session.sourcePath)} (${details}${nativeId})`);
+    // An import that began at the agent's last compaction holds what the agent
+    // itself still holds; the turns before that point exist only in this file.
+    const compactionLine = Number(session.importedFrom?.compactionLine);
+    const from = Number.isInteger(compactionLine) && compactionLine > 0
+      ? `; imported from its last compaction point at line ${compactionLine}, so earlier turns are only in this file`
+      : '';
+    lines.push(`- ${safeMetadataValue(session.sourcePath)} (${details}${nativeId}${from})`);
   }
 
   const mediaRecords = omittedMediaSourceRecords(blocks);

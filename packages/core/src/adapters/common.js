@@ -149,7 +149,38 @@ export async function cachedDiscovery(options, file, root, probe) {
 // Which import options change what a native file imports as. Recorded in the
 // manifest so an unchanged file is re-imported when the options differ.
 export function importSignature(options = {}) {
-  return options.subagentTranscripts ? 'subagent-transcripts' : '';
+  const parts = [];
+  if (options.fromLastCompaction !== false) parts.push('from-compaction');
+  if (options.subagentTranscripts) parts.push('subagent-transcripts');
+  return parts.join('+');
+}
+
+// Where a transcript was last compacted: the one-based line of the record,
+// its length, and how many compactions the file holds. Nothing is parsed -
+// each line is judged by `test` on its text, and a line too long to buffer by
+// the head the reader keeps of it - so a 1.2 GB thread streams past in a few
+// seconds. Undefined when the file was never compacted.
+export async function findLastCompaction(filePath, test, options = {}) {
+  let found;
+  let count = 0;
+  const note = (line, chars) => {
+    found = { line, chars };
+    count += 1;
+  };
+  await readJsonlObjects(
+    filePath,
+    (object, lineNumber) => {
+      if (object?.type === 'oversized_line' && test(String(object.rawLine || ''))) note(lineNumber, object.chars);
+    },
+    {
+      ...options,
+      lineFilter: (line, lineNumber) => {
+        if (test(line)) note(lineNumber, line.length);
+        return false;
+      }
+    }
+  );
+  return found ? { ...found, count } : undefined;
 }
 
 // How much of an oversized line is kept for the placeholder: enough to name the

@@ -4,6 +4,8 @@ import { createTurn } from '../schema.js';
 import { writeSession } from '../store.js';
 import {
   createBoundedTurnCollector,
+  DEFAULT_MAX_JSONL_LINE_CHARS,
+  findLastCompaction,
   homePath,
   listSessionFiles,
   oversizedLineSummary,
@@ -107,15 +109,34 @@ export async function discoverCodexSessions(options = {}) {
 
 export async function importCodexSession(root, session, options = {}) {
   const collector = createBoundedTurnCollector(options);
+  let compaction;
   if (isJsonRollout(session.path)) {
     (await readJsonRollout(session.path, options)).forEach((event, index) => {
       collector.push(codexEventToTurn(event, session, index + 1));
     });
   } else {
+    // A thread Codex has compacted is imported from its last compaction: the
+    // user requests Codex retained and everything since, which is the view
+    // Codex itself holds. The whole thread remains in the native file.
+    compaction = options.fromLastCompaction === false
+      ? undefined
+      : await findLastCompaction(session.path, codexCompactionLine, options);
+    const from = compaction?.line || 0;
     await readJsonlObjects(session.path, (event, lineNumber) => {
-      const turn = codexEventToTurn(event, session, lineNumber);
-      collector.push(turn);
-    }, { ...options, lineFilter: codexLineWanted });
+      if (compaction && lineNumber === compaction.line) {
+        for (const turn of codexCompactionTurns(event, session, lineNumber, compaction)) collector.push(turn);
+        return;
+      }
+      collector.push(codexEventToTurn(event, session, lineNumber));
+    }, {
+      ...options,
+      // The compaction record is read whole, however long; lines before it are
+      // passed over unparsed, as are the records never used after it.
+      maxLineChars: compaction
+        ? Math.max(options.maxLineChars || DEFAULT_MAX_JSONL_LINE_CHARS, compaction.chars + 1024)
+        : options.maxLineChars,
+      lineFilter: (line, lineNumber) => lineNumber === from || (lineNumber > from && codexLineWanted(line))
+    });
   }
   const { turns } = collector;
   if (turns.length === 0) throw new Error(`No importable Codex turns found in ${session.path}`);
@@ -128,10 +149,98 @@ export async function importCodexSession(root, session, options = {}) {
     sourceSize: session.size,
     sourceMtimeMs: session.mtimeMs,
     importSignature: importSignature(options),
+    importedFrom: compaction ? { compactionLine: compaction.line, compactions: compaction.count } : undefined,
     nativeSessionId: session.sessionId,
     title: session.title,
     named: session.named
   });
+}
+
+const CODEX_COMPACTED_RECORD = /"type":"compacted"/;
+
+export function codexCompactionLine(line) {
+  return CODEX_COMPACTED_RECORD.test(line.slice(0, 240));
+}
+
+// What the model holds once Codex has compacted a thread: a summary of
+// everything before, which 2026 builds encrypt so only Codex can read it,
+// and the user messages it retained verbatim. Builds before encryption wrote
+// the summary in the clear, and it is kept when found. The retained requests
+// keep their own times, so they sort before the note that marks the point.
+function codexCompactionTurns(event, session, lineNumber, compaction) {
+  const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
+  const history = Array.isArray(payload.replacement_history) ? payload.replacement_history : [];
+  const identity = { provider: CODEX_PROVIDER, surface: session.surface || 'cli', sessionId: `native-codex-${session.sessionId}` };
+  const metadata = (extra) => ({
+    nativeProvider: 'codex',
+    nativeType: 'compacted',
+    nativeSessionId: session.sessionId,
+    nativePath: session.path,
+    lineNumber,
+    cwd: session.cwd,
+    ...extra
+  });
+
+  const turns = [];
+  let retained = 0;
+  for (const item of history) {
+    if (!item || item.type !== 'message' || item.role !== 'user') continue;
+    const turn = codexEventToTurn(
+      { timestamp: codexItemTime(item) || event?.timestamp, type: 'response_item', payload: item },
+      session,
+      lineNumber
+    );
+    if (!turn) continue;
+    turn.metadata = { ...turn.metadata, retainedAtCompaction: true };
+    turns.push(turn);
+    retained += 1;
+  }
+
+  const summary = codexCompactionSummary(payload, history);
+  const window = Number.isFinite(payload.window_number) ? ` (context window ${payload.window_number})` : '';
+  const earlier = compaction.count > 1
+    ? `, having been compacted ${compaction.count - 1} time${compaction.count === 2 ? '' : 's'} before`
+    : '';
+  const requests = `${retained} user request${retained === 1 ? '' : 's'}`;
+  turns.push(createTurn({
+    role: 'system',
+    timestamp: event?.timestamp,
+    content:
+      `Codex compacted this thread at this point${window}${earlier}. ` +
+      (summary
+        ? 'Its own summary of everything before follows as the next turn; '
+        : 'Its summary of everything before is encrypted and only Codex can read it; ') +
+      `the ${requests} it retained verbatim are included above with their original times, ` +
+      'and the earlier turns remain in the native transcript named at the end of this handoff.',
+    metadata: metadata({
+      compaction: { windowNumber: payload.window_number, retained, summary: summary ? 'text' : 'encrypted' }
+    })
+  }, identity));
+  if (summary) {
+    turns.push(createTurn({
+      role: 'assistant',
+      timestamp: event?.timestamp,
+      content: `Summary of the thread up to its compaction, written by Codex:\n\n${summary}`,
+      metadata: metadata({ compactionSummary: true })
+    }, identity));
+  }
+  return turns;
+}
+
+function codexItemTime(item) {
+  const seconds = item?.internal_chat_message_metadata_passthrough?.create_time;
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  const at = new Date(seconds * 1000);
+  return Number.isNaN(at.getTime()) ? undefined : at.toISOString();
+}
+
+function codexCompactionSummary(payload, history) {
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim();
+  const item = history.find((entry) => entry?.type === 'compaction');
+  for (const key of ['summary', 'text', 'message', 'content']) {
+    if (typeof item?.[key] === 'string' && item[key].trim()) return item[key].trim();
+  }
+  return undefined;
 }
 
 // Records the adapter never turns into a turn, recognised from the first

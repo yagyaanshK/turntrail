@@ -277,6 +277,19 @@ directory. Raw, unredacted transcript content is never copied into an attachment
 
 JSONL parsing is streaming and line-bounded. A line over the per-line limit is discarded chunk by chunk rather than buffered, and the reader emits an `oversized_line` placeholder carrying only a short head of the line; adapters turn it into a system turn that names the line number, size, and native record type. Discovery retains a bounded newest candidate set, and import/export enforce explicit turn and content ceilings. These limits bound memory without modifying the native source or the complete sessions already stored in the ledger; callers can deliberately raise them for unusually large workspaces. Core loops accept an abort signal, which the VS Code progress notification wires to its Cancel action.
 
+A compacted chat is imported from its last compaction point. `findLastCompaction` streams the file
+once without parsing, judging each line by its text (a `compacted` record for Codex, a user record
+flagged `isCompactSummary` for Claude Code) and an oversized line by the head the reader keeps of
+it, and returns the line, its length and the count. The import then reads from that line: the
+record itself whole, with the line limit raised to fit it, and only the wanted records after it.
+For Codex the record's `replacement_history` yields the user messages Codex retained, timed from
+their `create_time`, then a system note marking the point; the `compaction` item that carries the
+summary is `encrypted_content` in 2026 builds, and a plain `message` from older builds is kept as
+an assistant turn. For Claude the flagged record is the summary itself. The manifest entry records
+`importedFrom.compactionLine`, the import signature carries `from-compaction` so an unchanged file
+is re-imported once when the option changes, and the handoff's native transcript line names the
+line the import began at. `fromLastCompaction: false` imports the whole thread as before.
+
 Four things keep the common operations fast on large stores. The reader assembles a line from
 its stream chunks in an array and joins it once at the newline, rather than appending each chunk
 to a growing string, which on an 8 MB record re-copied the whole line per chunk. An adapter can

@@ -384,6 +384,11 @@
           "default": true,
           "description": "Collapse consecutive duplicate turns. Native logs (e.g. Codex) record each message under several event types, producing 2-3 identical copies; this removes the repeats."
         },
+        "turntrail.importFromLastCompaction": {
+          "type": "boolean",
+          "default": true,
+          "description": "Import a native chat from its last compaction point, which is what the agent itself still holds: for Codex the user requests it retained and everything since, for Claude Code the summary it wrote and everything since. Turn off to import whole threads. The native file keeps every turn either way, and the handoff names it."
+        },
         "turntrail.subagentTranscripts": {
           "type": "boolean",
           "default": false,

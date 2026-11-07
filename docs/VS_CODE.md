@@ -80,6 +80,16 @@ same provider. An oversized individual record inside a transcript (such as a Cod
 record on a long thread) is skipped and noted in the imported session rather than failing the
 import.
 
+A chat the agent has compacted is imported from its **last compaction point**, which is the view
+the agent itself still holds. For Codex that is the user requests it retained verbatim, with their
+original times, then everything since; the summary Codex wrote of what came before is encrypted in
+current builds, so a note says so (older builds wrote it in the clear, and then it is included).
+For Claude Code it is the summary Claude wrote, which Claude reads as the user's first message,
+then everything since. The import stays the size of the live part of the thread however long the
+thread has run, and the handoff names the native file and the line the import began at, so the
+earlier turns are never lost, only left where they are. `turntrail.importFromLastCompaction` turns
+this off for whole-thread imports; changing it re-imports unchanged files once.
+
 A Claude Code session that launched background agents (the ones the Agent map shows) imports with
 each agent's final report spliced in right after the turn that launched it, so a handoff carries
 what the agents found. The agents' own recordings are not listed as sessions. Set

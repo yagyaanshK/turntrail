@@ -4,6 +4,7 @@ import { createTurn } from '../schema.js';
 import { writeSession } from '../store.js';
 import {
   createBoundedTurnCollector,
+  findLastCompaction,
   homePath,
   jsonlFileInfo,
   listJsonlFiles,
@@ -103,6 +104,14 @@ export async function importClaudeSession(root, session, options = {}) {
   const collector = createBoundedTurnCollector(options);
   const ledgerSessionId = `native-claude-${session.sessionId}`;
   const launches = [];
+  // A session Claude has compacted is imported from its last compaction: the
+  // summary Claude wrote itself, which it reads as the user's first message,
+  // and everything since. That is the view Claude holds, and the whole
+  // session remains in the native file.
+  const compaction = options.fromLastCompaction === false || session.subagent
+    ? undefined
+    : await findLastCompaction(session.path, claudeCompactionLine, options);
+  const from = compaction?.line || 0;
   await readJsonlObjects(session.path, (event, lineNumber) => {
     const turn = claudeEventToTurn(event, session, lineNumber);
     collector.push(turn);
@@ -110,7 +119,7 @@ export async function importClaudeSession(root, session, options = {}) {
     // The agent's own transcript is spliced in right after the turn that
     // launched it, which is where a reader expects the result.
     if (launch) launches.push({ ...launch, after: collector.turns.length });
-  }, options);
+  }, from ? { ...options, lineFilter: (line, lineNumber) => lineNumber >= from } : options);
 
   const turns = launches.length > 0
     ? await spliceSubagents(collector.turns, launches, session, options)
@@ -124,10 +133,21 @@ export async function importClaudeSession(root, session, options = {}) {
     sourceSize: session.size,
     sourceMtimeMs: session.mtimeMs,
     importSignature: importSignature(options),
+    importedFrom: compaction ? { compactionLine: compaction.line, compactions: compaction.count } : undefined,
     nativeSessionId: session.subagent ? session.parentSessionId : session.sessionId,
     title: session.title,
     named: session.named
   });
+}
+
+// Claude Code records a compaction as a user message carrying the summary it
+// wrote, flagged `isCompactSummary`, after a `compact_boundary` system record.
+// The flag sits after the message text, so the whole line is searched; inside
+// a message the same text would be escaped and not match.
+const CLAUDE_COMPACT_SUMMARY = /"isCompactSummary":true/;
+
+export function claudeCompactionLine(line) {
+  return CLAUDE_COMPACT_SUMMARY.test(line);
 }
 
 export function claudeEventToTurn(event, session, lineNumber, extra = {}) {

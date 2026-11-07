@@ -1815,6 +1815,9 @@ async function findAgentCommand(target) {
 function importOptions() {
   return {
     includeArchived: true,
+    // A compacted chat is imported from its last compaction point, the view
+    // the agent itself still holds, unless the user wants whole threads.
+    fromLastCompaction: setting('importFromLastCompaction') !== false,
     // Whether a Claude Code session that launched agents carries their whole
     // recordings, or only each agent's final report.
     subagentTranscripts: setting('subagentTranscripts') === true

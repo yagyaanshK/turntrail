@@ -49,7 +49,9 @@ test('an oversized Codex compaction record is skipped and reported instead of fa
   const sessions = await discoverNativeSessions('codex', { root, sessionsDir, maxLineChars: 4096 });
   assert.equal(sessions.length, 1, 'discovery still lists the thread');
 
-  const imported = await importNativeSession(root, 'codex', { root, sessionsDir, last: true, maxLineChars: 4096 });
+  // A whole-thread import: from the compaction point the record is read whole
+  // instead, which compaction-import.test.js covers.
+  const imported = await importNativeSession(root, 'codex', { root, sessionsDir, last: true, maxLineChars: 4096, fromLastCompaction: false });
   const turns = await readAllTurns(root);
   const contents = turns.map((turn) => turn.content);
 
@@ -71,7 +73,8 @@ test('Codex custom tool calls and their outputs are imported as tool turns', asy
   await initStore(root);
   const { sessionsDir } = await writeLongCodexThread(root, { compactedChars: 10 });
 
-  await importNativeSession(root, 'codex', { root, sessionsDir, last: true });
+  // The tool turns sit before the thread's compaction, so the whole thread is asked for.
+  await importNativeSession(root, 'codex', { root, sessionsDir, last: true, fromLastCompaction: false });
   const tools = (await readAllTurns(root)).filter((turn) => turn.role === 'tool');
 
   assert.equal(tools.length, 2);

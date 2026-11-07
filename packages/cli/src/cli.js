@@ -36,7 +36,7 @@ Usage:
   turntrail init [--cwd <path>]
   turntrail import --provider <name> [--surface <name>] <file> [--cwd <path>]
   turntrail discover --provider claude|codex|gemini|cursor [--all] [--include-subagents] [--cwd <path>]
-  turntrail import-native --provider claude|codex|gemini|cursor [--last|--session <id>] [--all] [--subagent-transcripts] [--force] [--cwd <path>]
+  turntrail import-native --provider claude|codex|gemini|cursor [--last|--session <id>] [--all] [--whole-thread] [--subagent-transcripts] [--force] [--cwd <path>]
   turntrail run claude|codex|gemini|cursor [-- <native args>] [--cwd <path>]
   turntrail snapshot [--cwd <path>]
   turntrail export --to <target> [--max-chars <n>] [--max-tokens <n>] [--dry-run]
@@ -155,6 +155,9 @@ export async function runCli(argv, io = process, dependencies = {}) {
       sessionId: flags.session,
       includeArchived: Boolean(flags.includeArchived),
       includeSubagents: Boolean(flags.includeSubagents),
+      // A compacted chat imports from its last compaction point unless the
+      // whole thread is asked for.
+      fromLastCompaction: !flags.wholeThread,
       subagentTranscripts: Boolean(flags.subagentTranscripts),
       force: Boolean(flags.force)
     });
