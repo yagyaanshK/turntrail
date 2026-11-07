@@ -157,6 +157,7 @@ export async function mergeSessionIndex(nativeByProvider, manifest, options = {}
         latest: session.latest,
         opening: session.opening,
         named: Boolean(session.named),
+        subagent: session.subagent ? true : undefined,
         modifiedAt: session.modifiedAt,
         cwd: session.cwd,
         size: session.size,

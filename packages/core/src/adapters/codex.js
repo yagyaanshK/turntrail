@@ -90,6 +90,8 @@ export async function discoverCodexSessions(options = {}) {
         opening: name && meta.first !== name ? meta.first : undefined,
         latest: latest && latest !== meta.preview && latest !== title ? latest : undefined,
         forkedFrom: meta.forkedFrom,
+        subagent: meta.subagent,
+        parentSessionId: meta.parentSessionId,
         modifiedAt: file.modifiedAt,
         mtimeMs: file.mtimeMs,
         size: file.size,
@@ -488,6 +490,24 @@ function contentToText(value) {
   return String(value);
 }
 
+// The thread a subagent rollout was spawned from. 2026 builds record it three
+// ways at once - `parent_thread_id`, `thread_source: "subagent"`, and the
+// spawn inside `source.subagent` - and any one of them is enough.
+export function codexParentThread(payload) {
+  if (!payload || typeof payload !== 'object') return undefined;
+  if (typeof payload.parent_thread_id === 'string' && payload.parent_thread_id) return payload.parent_thread_id;
+  const spawn = payload.source && typeof payload.source === 'object' ? payload.source.subagent : undefined;
+  if (spawn && typeof spawn === 'object') {
+    for (const value of Object.values(spawn)) {
+      if (value && typeof value === 'object' && typeof value.parent_thread_id === 'string' && value.parent_thread_id) {
+        return value.parent_thread_id;
+      }
+    }
+  }
+  if (spawn || payload.thread_source === 'subagent') return 'unknown';
+  return undefined;
+}
+
 export function codexSurface(source, originator) {
   if (typeof source === 'string' && source) return source;
 
@@ -519,6 +539,7 @@ async function inspectCodexFile(filePath, options) {
   let cwd;
   let source;
   let forkedFrom;
+  let parentSessionId;
 
   for (const event of objects) {
     if (event.type === 'session_meta') {
@@ -526,6 +547,7 @@ async function inspectCodexFile(filePath, options) {
       cwd ||= event.payload?.cwd;
       source ||= codexSurface(event.payload?.source, event.payload?.originator);
       forkedFrom ||= event.payload?.forked_from_id;
+      parentSessionId ||= codexParentThread(event.payload);
     }
   }
 
@@ -536,6 +558,11 @@ async function inspectCodexFile(filePath, options) {
     cwd: cwd || environmentCwd(objects),
     source,
     forkedFrom,
+    // A thread Codex spawned for a subagent is machinery of its parent, kept
+    // in its own rollout. It is listed, since it can be read and handed off,
+    // but apart from the chats the user actually had.
+    subagent: Boolean(parentSessionId) || undefined,
+    parentSessionId,
     ...describeRequests(codexRequestTexts(objects))
   };
 }

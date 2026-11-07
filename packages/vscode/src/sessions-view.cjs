@@ -174,7 +174,8 @@ function publicRow(row) {
     size: row.size,
     matchesProject: row.matchesProject,
     imported: row.imported,
-    importedAt: row.importedAt
+    importedAt: row.importedAt,
+    subagent: row.subagent
   };
 }
 
@@ -265,6 +266,10 @@ function html(webview) {
   .managed-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82em; }
   .managed-empty { color: var(--dim); font-size: 0.78em; }
   .list { display: flex; flex-direction: column; gap: 7px; }
+  .subagents { margin-top: 9px; }
+  .subagents > summary { cursor: pointer; color: var(--dim); font-size: 0.84em; user-select: none; }
+  .subagents > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+  .subagents > .list { margin-top: 7px; }
   .session {
     --accent: var(--vscode-foreground);
     padding: 9px 9px 8px;
@@ -322,6 +327,7 @@ let openHandoff = saved.openHandoff || '';
 let target = saved.target || 'claude';
 let mode = saved.mode || 'new';
 let delivery = saved.delivery || 'clipboard';
+let subagentsOpen = saved.subagentsOpen === true;
 
 function esc(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
@@ -394,17 +400,28 @@ function card(row) {
   '</article>';
 }
 function persist() {
-  vscode.setState({ query: query, provider: provider, openHandoff: openHandoff, target: target, mode: mode, delivery: delivery, model: model });
+  vscode.setState({ query: query, provider: provider, openHandoff: openHandoff, target: target, mode: mode, delivery: delivery, subagentsOpen: subagentsOpen, model: model });
+}
+// Threads an agent spawned for its subagents are machinery, and a long Codex
+// task spawns dozens, so they would crowd out the chats the user actually had.
+// They are kept in one section, folded until asked for.
+function subagentSessions(rows) {
+  if (!rows.length) return '';
+  return '<details class="subagents"' + (subagentsOpen ? ' open' : '') + '><summary>Sub agents (' + rows.length + ')</summary>' +
+    '<div class="list">' + rows.map(card).join('') + '</div></details>';
 }
 function render() {
   const needle = query.trim().toLowerCase();
-  const rows = (model.sessions || []).filter(function (row) {
+  const shown = (model.sessions || []).filter(function (row) {
     if (provider !== 'all' && row.provider !== provider) return false;
     if (!needle) return true;
     return [row.title, row.latest, row.cwd, row.sessionId, row.provider].some(function (value) {
       return String(value || '').toLowerCase().includes(needle);
     });
   });
+  const rows = shown.filter(function (row) { return !row.subagent; });
+  const subagents = shown.filter(function (row) { return row.subagent; });
+  const total = (model.sessions || []).filter(function (row) { return !row.subagent; }).length;
   const providerOptions = ['<option value="all">All providers</option>'].concat((model.providers || []).map(function (item) {
     return '<option value="' + esc(item.id) + '"' + (provider === item.id ? ' selected' : '') + '>' + esc(item.label) + '</option>';
   })).join('');
@@ -422,9 +439,10 @@ function render() {
     '<div class="toolbar"><input class="search" type="search" aria-label="Search sessions" placeholder="Search sessions" value="' + esc(query) + '">' +
       '<select aria-label="Filter provider">' + providerOptions + '</select></div>' +
     '<div class="scope"><button data-scope="false" aria-pressed="' + (!model.all) + '">Workspace</button><button data-scope="true" aria-pressed="' + model.all + '">Everywhere</button></div>' +
-    '<div class="summary"><span>' + rows.length + ' of ' + (model.sessions || []).length + ' sessions' + (model.loading ? ' | scanning' : '') + '</span><button class="refresh" data-act="refresh" title="Refresh sessions" aria-label="Refresh sessions">&#x21bb;</button></div>' +
+    '<div class="summary"><span>' + rows.length + ' of ' + total + ' sessions' + (model.loading ? ' | scanning' : '') + '</span><button class="refresh" data-act="refresh" title="Refresh sessions" aria-label="Refresh sessions">&#x21bb;</button></div>' +
     errors +
-    '<div class="list">' + (rows.length ? rows.map(card).join('') : '<div class="empty">' + emptyMessage(needle || provider !== 'all') + '</div>') + '</div>';
+    '<div class="list">' + (rows.length ? rows.map(card).join('') : '<div class="empty">' + emptyMessage(needle || provider !== 'all') + '</div>') + '</div>' +
+    subagentSessions(subagents);
   if (typing) {
     const search = root.querySelector('.search');
     if (search) {
@@ -450,6 +468,11 @@ root.addEventListener('input', function (event) {
 root.addEventListener('change', function (event) {
   if (event.target.matches('select')) { provider = event.target.value; persist(); render(); }
 });
+// A toggle event does not bubble, so it is caught on the way down. Remembering
+// the state keeps the section as the user left it across refreshes and re-renders.
+root.addEventListener('toggle', function (event) {
+  if (event.target.matches('details.subagents')) { subagentsOpen = event.target.open; persist(); }
+}, true);
 root.addEventListener('click', function (event) {
   const scope = event.target.closest('[data-scope]');
   if (scope) { vscode.postMessage({ type: 'scope', all: scope.dataset.scope === 'true' }); return; }

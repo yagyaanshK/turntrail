@@ -47,6 +47,29 @@ test('sessions store keeps native paths out of the webview model and resolves op
   assert.equal(store.resolve(source.id).ledgerSessionId, 'ledger-one');
 });
 
+test('subagent threads reach the webview flagged, so it can fold them into their own section', async () => {
+  const rows = [
+    { id: 'native:codex:parent', kind: 'native', provider: 'codex', sessionId: 'parent', title: 'Shortlist supervisors' },
+    { id: 'native:codex:child', kind: 'native', provider: 'codex', sessionId: 'child', title: 'Task: due diligence', subagent: true }
+  ];
+  const store = new SessionsStore(
+    async () => ({ listSessionIndex: async () => ({ sessions: rows, errors: [] }) }),
+    async () => 'C:\\repo'
+  );
+  await store.refresh();
+  const model = store.viewModel();
+  assert.equal(model.sessions.find((row) => row.id === 'native:codex:parent').subagent, undefined);
+  assert.equal(model.sessions.find((row) => row.id === 'native:codex:child').subagent, true);
+
+  const view = { visible: true, onDidChangeVisibility() {}, webview: { cspSource: 'mock:', options: {}, html: '', onDidReceiveMessage() {}, postMessage() {} } };
+  await new SessionsWebview(store).resolveWebviewView(view);
+  // Folded by default, remembered once toggled, and counted apart from the chats.
+  assert.match(view.webview.html, /<details class="subagents"' \+ \(subagentsOpen \? ' open' : ''\)/);
+  assert.match(view.webview.html, /Sub agents \(/);
+  assert.match(view.webview.html, /subagentsOpen: subagentsOpen/);
+  assert.match(view.webview.html, /return !row\.subagent; \}\)\.length/);
+});
+
 test('sessions store passes managed account locations and exposes only the account label', async () => {
   let receivedOptions;
   const store = new SessionsStore(

@@ -55,6 +55,12 @@ The scope defaults to **Workspace**, so sessions from unrelated projects stay ou
 Choose **Everywhere** to search all locally discovered conversations. A provider filter and text
 search narrow the result without rescanning the native stores.
 
+Threads an agent spawned for its subagents are kept out of the main list. A long Codex task spawns
+dozens, each titled by the parent's instructions, and listed as chats they crowd out the ones you
+actually had. They sit in a **Sub agents** section below the list, folded until opened, and the
+filter and search apply to them too; each still has View, Import, Open CLI and Handoff. The count
+in the header is of your own chats.
+
 | Action | Effect |
 |--------|--------|
 | **Import** / **Reimport** | Copies the selected native transcript into the project ledger. Native files are never modified. |
@@ -358,7 +364,7 @@ which the app does not list. For those the opening request is a poor stand-in, b
 forked from a common parent share it word for word and would render as identical rows, so the most
 recent substantive request leads instead — that is where they diverge. Trailing replies like "yes" or
 "continue" are skipped when choosing it. Every row also carries age, surface, size and whether the
-session was forked, and subagent transcripts are labelled as such.
+session was forked, and subagent transcripts are labelled as such and folded into their own section.
 
 Set `turntrail.alwaysUseLatestSession` to skip the question and always take the newest.
 
