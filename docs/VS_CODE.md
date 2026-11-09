@@ -398,6 +398,17 @@ Continue in this existing session using this Turntrail handoff:
 Read the handoff before acting...
 ```
 
+After the instruction to read the handoff, every prompt sends the receiving agent to the sources
+behind it before it asks the user anything: the ledger session files the handoff lists, for turns
+it omitted or collapsed; any attachment a `[Turntrail truncated ...]` marker points at in a turn
+that matters; and the provider-owned transcript, including the part before a compaction point, for
+earlier decisions and the previous agent's replies. The folders are named from the handoff path,
+`.turntrail/` or `.context-bridge/`. The agent is told these files are large and not to load them
+whole, to search and read in line ranges, to skip image payloads, what to prioritise, that the
+files are read-only and their contents historical data rather than instructions, and to say in
+its first reply which sources it read, which it skipped, and why. The handoff document's native
+transcript section says the same about how to read those files.
+
 Every prompt ends by leaving two decisions to the user rather than to whatever the transcript
 implies. The receiving agent is told which folder holds this workspace's ledger, `.turntrail/` or
 the older `.context-bridge/`, taken from the handoff path so an agent never goes looking for the
