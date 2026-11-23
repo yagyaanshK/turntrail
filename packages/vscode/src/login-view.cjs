@@ -38,6 +38,7 @@ class LoginPanel {
     this.operation = undefined;
     this.operationController = undefined;
     this.provisionalAccountId = undefined;
+    this.duplicateAccountId = undefined;
   }
 
   async open(target = {}) {
@@ -67,7 +68,7 @@ class LoginPanel {
       this.panel.webview.html = html(this.panel.webview, provider);
       this.panel.webview.onDidReceiveMessage((message) => {
         void this.onMessage(message).catch((error) => {
-          this.post({ type: 'failed', method: message?.method, message: error.message });
+          this.reportFailure(error, message?.method);
         });
       });
       this.panel.onDidChangeViewState?.((event) => {
@@ -82,11 +83,16 @@ class LoginPanel {
       });
     }
     this.pendingLabel = target.label || '';
-    this.post({ type: 'ready', label: target.label || '', locked: Boolean(target.accountId) });
+    this.post({ type: 'ready', label: target.label || '', locked: Boolean(target.accountId), reset: Boolean(changingTarget) });
   }
 
   post(message) {
     this.panel?.webview.postMessage(message);
+  }
+
+  reportFailure(error, method) {
+    this.duplicateAccountId = error?.code === 'DUPLICATE_ACCOUNT' ? error.existingAccountId : undefined;
+    this.post({ type: 'failed', method, message: error.message, canSignInExisting: Boolean(this.duplicateAccountId) });
   }
 
   async cancel() {
@@ -110,6 +116,15 @@ class LoginPanel {
   }
 
   async onMessage(message) {
+    if (message?.type === 'signInExisting') {
+      if (!this.duplicateAccountId || this.operation) return;
+      const { getAccount } = await this.core();
+      const account = await getAccount(this.duplicateAccountId);
+      if (!account || account.provider !== this.provider) throw new Error('That account is no longer available.');
+      this.duplicateAccountId = undefined;
+      await this.open({ provider: account.provider, accountId: account.id, label: account.label });
+      return;
+    }
     if (message?.type === 'cancel') {
       await this.cancel();
       this.post({ type: 'idle' });
@@ -137,7 +152,7 @@ class LoginPanel {
       try {
         await this.runOperation((signal) => this.adoptFromFile(signal));
       } catch (error) {
-        this.post({ type: 'failed', method: 'paste', message: error.message });
+        this.reportFailure(error, 'paste');
       }
       return;
     }
@@ -145,7 +160,7 @@ class LoginPanel {
       try {
         await this.runOperation((signal) => this.start(message, signal));
       } catch (error) {
-        this.post({ type: 'failed', method: message.method, message: error.message });
+        this.reportFailure(error, message.method);
       }
     }
   }
@@ -225,7 +240,7 @@ class LoginPanel {
     // different file - so ask the API who it belongs to rather than showing an
     // unlabelled card.
     if (claude) auth = (await backfillClaudeProfile(accountId, { signal }).catch((error) => {
-      if (error?.code === 'PROVIDER_CONTRACT_CHANGED') throw error;
+      if (error?.code === 'PROVIDER_CONTRACT_CHANGED' || error?.code === 'DUPLICATE_ACCOUNT') throw error;
       return auth;
     })) || auth;
 
@@ -282,7 +297,7 @@ class LoginPanel {
     let auth = await importClaudeAuth(accountId, defaultClaudeHome());
     if (!auth) throw new Error('That directory has a credential file but no access token in it.');
     auth = (await backfillClaudeProfile(accountId, { signal }).catch((error) => {
-      if (error?.code === 'PROVIDER_CONTRACT_CHANGED') throw error;
+      if (error?.code === 'PROVIDER_CONTRACT_CHANGED' || error?.code === 'DUPLICATE_ACCOUNT') throw error;
       return auth;
     })) || auth;
 
@@ -405,7 +420,7 @@ class LoginPanel {
   // -------------------------------------------------------------------------
 
   async startCodex(message, signal) {
-    const { codexHome, refreshCodexAccountIdentity, codexLoginArgs, clearQuotaCache } = await this.core();
+    const { withCodexLoginHome, importCodexAuth, codexLoginArgs, clearQuotaCache } = await this.core();
 
     if (this.child) throw new Error('A sign-in is already running. Cancel it first.');
 
@@ -414,12 +429,12 @@ class LoginPanel {
     const args = codexLoginArgs(method);
     this.post({ type: 'running', method });
 
-    const result = await this.run(args, codexHome(accountId), method, message.secret);
-    if (!result.ok) {
-      throw new Error(result.message);
-    }
-
-    const auth = await refreshCodexAccountIdentity(accountId);
+    const auth = await withCodexLoginHome(accountId, async (home) => {
+      const result = await this.run(args, home, method, message.secret);
+      if (!result.ok) throw new Error(result.message);
+      signal.throwIfAborted();
+      return importCodexAuth(accountId, home);
+    });
     if (!auth) {
       throw new Error('Sign-in finished but no credential was written. Try again.');
     }
@@ -1106,6 +1121,15 @@ window.addEventListener('message', (event) => {
   const name = data.method || method;
 
   if (data.type === 'ready') {
+    if (data.reset) {
+      clearSecrets();
+      $('outcome').hidden = true;
+      document.querySelectorAll('.card').forEach((element) => {
+        reset(element.dataset.method);
+        element.classList.remove('open');
+        element.querySelector('.body').hidden = true;
+      });
+    }
     $('label').value = data.label || '';
     $('nameField').hidden = Boolean(data.locked);
     return;
@@ -1187,6 +1211,15 @@ window.addEventListener('message', (event) => {
       body.prepend(error);
     }
     error.innerHTML = '<b>Sign-in did not complete.</b>' + esc(data.message || '');
+    if (data.canSignInExisting) {
+      const existing = document.createElement('button');
+      existing.type = 'button';
+      existing.className = 'secondary';
+      existing.textContent = 'Sign in to existing account';
+      existing.addEventListener('click', () => vscode.postMessage({ type: 'signInExisting' }));
+      error.appendChild(document.createElement('br'));
+      error.appendChild(existing);
+    }
     error.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' });
     return;
   }

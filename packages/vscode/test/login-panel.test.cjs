@@ -160,3 +160,67 @@ test('importing Claude current login records it as already applied', async () =>
   assert.equal(reloads.length, 1);
   assert.equal(reloads[0].force, true);
 });
+
+test('Codex login runs in a temporary home and imports only after success', async () => {
+  const calls = [];
+  const panel = new LoginPanel({}, async () => ({
+    ensureCodexHome: async () => {},
+    codexLoginArgs: () => ['login'],
+    withCodexLoginHome: async (id, operation) => {
+      calls.push(['stage', id]);
+      return operation('temporary-home');
+    },
+    importCodexAuth: async (id, home) => {
+      calls.push(['import', id, home]);
+      return { claims: { email: 'person@example.com' } };
+    },
+    clearQuotaCache: async () => {}
+  }), { usage: new Map(), reloadUsage: async () => {} });
+  panel.provider = 'codex';
+  panel.target = { provider: 'codex', accountId: 'existing', label: 'Existing' };
+  panel.run = async (args, home) => { calls.push(['run', home]); return { ok: true }; };
+  await panel.startCodex({ method: 'browser' }, new AbortController().signal);
+  assert.deepEqual(calls, [['stage', 'existing'], ['run', 'temporary-home'], ['import', 'existing', 'temporary-home']]);
+  calls.length = 0;
+  panel.run = async () => ({ ok: false, message: 'Login cancelled' });
+  await assert.rejects(() => panel.startCodex({ method: 'browser' }, new AbortController().signal), /Login cancelled/);
+  assert.deepEqual(calls, [['stage', 'existing']]);
+});
+
+test('duplicate errors remove the provisional card and offer the original sign-in target', async () => {
+  const removals = [];
+  const posts = [];
+  const existing = { id: 'original', label: 'Original', provider: 'codex' };
+  const panel = new LoginPanel({}, async () => ({
+    removeAccount: async (id, options) => removals.push({ id, options }),
+    getAccount: async (id) => id === existing.id ? existing : undefined
+  }), {});
+  panel.provider = 'codex';
+  panel.target = { provider: 'codex', accountId: 'provisional', label: 'Copy' };
+  panel.provisionalAccountId = 'provisional';
+  panel.post = (message) => posts.push(message);
+  panel.start = async () => {
+    throw Object.assign(new Error('Already connected'), { code: 'DUPLICATE_ACCOUNT', existingAccountId: existing.id });
+  };
+  await panel.onMessage({ type: 'start', method: 'browser' });
+  assert.deepEqual(removals, [{ id: 'provisional', options: { purge: true, purgeLive: false } }]);
+  assert.equal(posts.at(-1).canSignInExisting, true);
+  let opened;
+  panel.open = async (target) => { opened = target; };
+  await panel.onMessage({ type: 'signInExisting', accountId: 'untrusted-other-id' });
+  assert.deepEqual(opened, { provider: 'codex', accountId: existing.id, label: existing.label });
+  assert.equal(panel.duplicateAccountId, undefined);
+});
+
+test('duplicate recovery action is offered only after a confirmed identity collision', async () => {
+  const posts = [];
+  const panel = new LoginPanel({}, async () => ({}), {});
+  panel.post = (message) => posts.push(message);
+  panel.reportFailure(new Error('Network unavailable'), 'browser');
+  assert.equal(posts[0].canSignInExisting, false);
+  assert.equal(panel.duplicateAccountId, undefined);
+  await panel.onMessage({ type: 'signInExisting' });
+  await panel.open({ provider: 'codex' });
+  assert.match(createdPanel.webview.html, /if \(data.canSignInExisting\)/);
+  assert.match(createdPanel.webview.html, /Sign in to existing account/);
+});

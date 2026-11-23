@@ -731,7 +731,7 @@ async function importAccount(item) {
       : await api.importCodexAuth(account.id, source);
     // A Claude credential carries no email; ask the API who it belongs to.
     if (claude) auth = (await api.backfillClaudeProfile(account.id).catch((error) => {
-      if (error?.code === 'PROVIDER_CONTRACT_CHANGED') throw error;
+      if (error?.code === 'PROVIDER_CONTRACT_CHANGED' || error?.code === 'DUPLICATE_ACCOUNT') throw error;
       return auth;
     })) || auth;
 

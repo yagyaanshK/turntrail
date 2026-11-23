@@ -8,6 +8,7 @@ import { isProviderContractError, validateClaudeCredentialPayload } from './prov
 import { assertAgentStopped } from './processes.js';
 import { carryClaudeRetention } from './claude-settings.js';
 import { renewLogin } from './renewals.js';
+import { withUniqueAccountIdentity } from './identity.js';
 
 export const CLAUDE_PROVIDER = 'claude';
 export const CLAUDE_PROACTIVE_REFRESH_MS = 4 * 60 * 60 * 1000;
@@ -157,15 +158,13 @@ export async function importClaudeAuth(accountId, sourceHome, options = {}) {
   const sourceAuth = await readClaudeAuth(sourceHome, options);
   if (!sourceAuth?.accessToken) throw new Error(`The Claude credential at ${source} has no usable login.`);
 
-  const target = await ensureClaudeHome(accountId, options);
-  await copyCredential(source, claudeCredentialsPath(target));
-
-  // Carry the identity across too, otherwise the adopted account has a working
-  // login that cannot be labelled with an email.
-  const profile = await readClaudeProfile(sourceHome, options);
-  if (profile) await writeClaudeProfile(claudeConfigPath(target, options), profile);
-
-  return refreshClaudeAccountIdentity(accountId, options);
+  return withUniqueAccountIdentity(accountId, CLAUDE_PROVIDER, sourceAuth, async () => {
+    const target = await ensureClaudeHome(accountId, options);
+    await copyCredential(source, claudeCredentialsPath(target));
+    const profile = await readClaudeProfile(sourceHome, options);
+    if (profile) await writeClaudeProfile(claudeConfigPath(target, options), profile);
+    return recordClaudeAccountIdentity(accountId, options);
+  }, options);
 }
 
 // Point the official Claude Code CLI and extension at this account.
@@ -463,6 +462,13 @@ async function writeClaudeCredentialFile(home, credential) {
 export async function refreshClaudeAccountIdentity(accountId, options = {}) {
   const auth = await readClaudeAuth(claudeHome(accountId, options), options);
   if (!auth?.accessToken) return null;
+  return withUniqueAccountIdentity(accountId, CLAUDE_PROVIDER, auth,
+    () => recordClaudeAccountIdentity(accountId, options), options);
+}
+
+async function recordClaudeAccountIdentity(accountId, options) {
+  const auth = await readClaudeAuth(claudeHome(accountId, options), options);
+  if (!auth?.accessToken) return null;
   await updateAccount(
     accountId,
     { email: auth.email, plan: auth.plan, signedInAt: new Date().toISOString() },
@@ -510,6 +516,18 @@ export function parseClaudeAuthText(text) {
 
 export async function importClaudeAuthText(accountId, text, options = {}) {
   const value = parseClaudeAuthText(text);
+  validateClaudeCredentialPayload(value);
+  const auth = {
+    ...value.claudeAiOauth,
+    organizationUuid: value.organizationUuid || options.profile?.organizationUuid,
+    email: options.profile?.emailAddress,
+    profile: options.profile
+  };
+  return withUniqueAccountIdentity(accountId, CLAUDE_PROVIDER, auth,
+    () => saveClaudeAuthText(accountId, value, options), options);
+}
+
+async function saveClaudeAuthText(accountId, value, options) {
   const home = await ensureClaudeHome(accountId, options);
   const file = claudeCredentialsPath(home);
   await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -526,7 +544,7 @@ export async function importClaudeAuthText(accountId, text, options = {}) {
   if (typeof options.profile === 'object' && options.profile) {
     await writeClaudeProfile(claudeConfigPath(home, options), options.profile);
   }
-  return refreshClaudeAccountIdentity(accountId, options);
+  return recordClaudeAccountIdentity(accountId, options);
 }
 
 // Store the result of a completed OAuth sign-in.
@@ -536,6 +554,12 @@ export async function importClaudeAuthText(accountId, text, options = {}) {
 // without knowing Turntrail was involved.
 export async function writeClaudeCredential(accountId, tokens, profile, options = {}) {
   if (!tokens?.accessToken) throw new Error('Sign-in returned no access token.');
+  const auth = { ...tokens, email: profile?.emailAddress, organizationUuid: profile?.organizationUuid, profile };
+  return withUniqueAccountIdentity(accountId, CLAUDE_PROVIDER, auth,
+    () => saveClaudeCredential(accountId, tokens, profile, options), options);
+}
+
+async function saveClaudeCredential(accountId, tokens, profile, options) {
   const home = await ensureClaudeHome(accountId, options);
 
   const credential = {
@@ -562,7 +586,7 @@ export async function writeClaudeCredential(accountId, tokens, profile, options 
   }
 
   if (profile) await writeClaudeProfile(claudeConfigPath(home, options), claudeProfileRecord(profile));
-  return refreshClaudeAccountIdentity(accountId, options);
+  return recordClaudeAccountIdentity(accountId, options);
 }
 
 // `plan` is ours, for labelling; everything else mirrors what Claude Code puts
@@ -669,7 +693,7 @@ export async function ensureClaudeAccessToken(accountId, options = {}) {
       // A refresh returns no profile, so keep the one already on disk rather
       // than wiping the account's identity every eight hours.
       const profile = await readClaudeProfile(claudeHome(accountId, options), options);
-      await writeClaudeCredential(
+      await saveClaudeCredential(
         accountId,
         tokens,
         profile ? { ...profile, plan: current.plan, organizationRateLimitTier: current.rateLimitTier } : undefined,
@@ -694,8 +718,11 @@ export async function backfillClaudeProfile(accountId, options = {}) {
     if (isProviderContractError(error)) throw error;
   }
   if (!profile) return auth;
-  await writeClaudeProfile(claudeConfigPath(claudeHome(accountId, options), options), claudeProfileRecord(profile));
-  return refreshClaudeAccountIdentity(accountId, options);
+  const identified = { ...auth, email: profile.emailAddress, organizationUuid: profile.organizationUuid, profile };
+  return withUniqueAccountIdentity(accountId, CLAUDE_PROVIDER, identified, async () => {
+    await writeClaudeProfile(claudeConfigPath(claudeHome(accountId, options), options), claudeProfileRecord(profile));
+    return recordClaudeAccountIdentity(accountId, options);
+  }, options);
 }
 
 // Patch a single key. Claude's config carries project history and caches that

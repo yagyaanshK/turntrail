@@ -269,10 +269,17 @@ export async function runCli(argv, io = process, dependencies = {}) {
     if (action === 'add') {
       const label = args.slice(1).join(' ').trim();
       if (!label) throw new Error('account add requires a label');
-      const account = await createAccount({ label, provider: 'codex' });
+      const accountOptions = dependencies.accountOptions || {};
+      const account = await createAccount({ label, provider: 'codex' }, accountOptions);
       if (flags.import) {
-        const auth = await importCodexAuth(account.id, defaultCodexHome());
-        io.stdout.write(`Added ${account.id} (${auth?.claims?.email || label}) from ${defaultCodexHome()}\n`);
+        let auth;
+        try {
+          auth = await importCodexAuth(account.id, defaultCodexHome(accountOptions), accountOptions);
+        } catch (error) {
+          await removeAccount(account.id, { ...accountOptions, purge: true, purgeLive: false });
+          throw error;
+        }
+        io.stdout.write(`Added ${account.id} (${auth?.claims?.email || label}) from ${defaultCodexHome(accountOptions)}\n`);
       } else {
         io.stdout.write(
           `Added ${account.id}. Sign in with:\n\n  CODEX_HOME="${codexHome(account.id)}" codex login\n`

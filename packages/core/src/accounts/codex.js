@@ -7,6 +7,7 @@ import { refreshCodexToken } from './codex-oauth.js';
 import { renewLogin } from './renewals.js';
 import { validateCodexCredentialPayload } from './provider-contracts.js';
 import { assertAgentStopped } from './processes.js';
+import { withUniqueAccountIdentity } from './identity.js';
 
 export const CODEX_PROVIDER = 'codex';
 
@@ -36,6 +37,19 @@ export async function ensureCodexHome(accountId, options = {}) {
   return home;
 }
 
+// Let the CLI finish in a disposable home. A failed/duplicate sign-in must not
+// replace an existing managed login before we have checked its identity.
+export async function withCodexLoginHome(accountId, operation, options = {}) {
+  const dir = accountDir(accountId, options);
+  await ensureDir(dir);
+  const home = await fs.mkdtemp(path.join(dir, 'codex-login-'));
+  try {
+    return await operation(home);
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+}
+
 // The environment a spawned `codex` process needs to act as this account.
 export function codexEnv(accountId, options = {}) {
   return { CODEX_HOME: codexHome(accountId, options) };
@@ -52,10 +66,12 @@ export async function readCodexAuth(home) {
     throw new Error(`Could not parse ${file}: ${error.message}`);
   }
   validateCodexCredentialPayload(raw);
+  return { path: file, ...codexCredentialAuth(raw) };
+}
 
+function codexCredentialAuth(raw) {
   const tokens = raw.tokens || {};
   return {
-    path: file,
     apiKey: raw.OPENAI_API_KEY || raw.openai_api_key,
     accessToken: tokens.access_token || tokens.accessToken,
     refreshToken: tokens.refresh_token || tokens.refreshToken,
@@ -82,18 +98,12 @@ export async function importCodexAuth(accountId, sourceHome, options = {}) {
   if (!sourceAuth?.accessToken && !sourceAuth?.apiKey) {
     throw new Error(`The Codex credential at ${source} has no usable login.`);
   }
-  const target = codexHome(accountId, options);
-  await ensureDir(target);
-  await copyCredential(source, codexAuthPath(target));
-
-  const auth = await readCodexAuth(target);
-  const signedInAt = new Date().toISOString();
-  await updateAccount(
-    accountId,
-    identityPatch(auth, { signedInAt }),
-    options
-  );
-  return auth;
+  return withUniqueAccountIdentity(accountId, CODEX_PROVIDER, sourceAuth, async () => {
+    const target = codexHome(accountId, options);
+    await ensureDir(target);
+    await copyCredential(source, codexAuthPath(target));
+    return recordCodexAccountIdentity(accountId, options);
+  }, options);
 }
 
 // Sixty seconds of slack, matching the Claude path: a token that lapses while
@@ -370,15 +380,12 @@ export function parseCodexAuthText(text) {
 
 export async function importCodexAuthText(accountId, text, options = {}) {
   const value = parseCodexAuthText(text);
-  const home = await ensureCodexHome(accountId, options);
-  // Same 0600 treatment the credential gets everywhere else.
-  await fs.writeFile(codexAuthPath(home), `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  try {
-    await fs.chmod(codexAuthPath(home), 0o600);
-  } catch {
-    // Windows and some network filesystems do not support POSIX modes.
-  }
-  return refreshCodexAccountIdentity(accountId, options);
+  validateCodexCredentialPayload(value);
+  return withUniqueAccountIdentity(accountId, CODEX_PROVIDER, codexCredentialAuth(value), async () => {
+    const home = await ensureCodexHome(accountId, options);
+    await writeFileAtomic(codexAuthPath(home), `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    return recordCodexAccountIdentity(accountId, options);
+  }, options);
 }
 
 // After a login completes, read back who signed in so the panel can label the
@@ -386,7 +393,14 @@ export async function importCodexAuthText(accountId, text, options = {}) {
 // which is how a cancelled or failed login is detected.
 export async function refreshCodexAccountIdentity(accountId, options = {}) {
   const auth = await readCodexAuth(codexHome(accountId, options));
-  if (!auth?.accessToken) return null;
+  if (!auth?.accessToken && !auth?.apiKey) return null;
+  return withUniqueAccountIdentity(accountId, CODEX_PROVIDER, auth,
+    () => recordCodexAccountIdentity(accountId, options), options);
+}
+
+async function recordCodexAccountIdentity(accountId, options) {
+  const auth = await readCodexAuth(codexHome(accountId, options));
+  if (!auth?.accessToken && !auth?.apiKey) return null;
   const signedInAt = new Date().toISOString();
   await updateAccount(
     accountId,
@@ -445,6 +459,7 @@ export function decodeJwtClaims(token) {
     const payload = JSON.parse(json);
     const auth = payload['https://api.openai.com/auth'] || {};
     return {
+      sub: payload.sub,
       email: payload.email || payload.preferred_username,
       plan: auth.chatgpt_plan_type || auth.chatgptPlanType,
       accountId: auth.chatgpt_account_id || auth.chatgptAccountId

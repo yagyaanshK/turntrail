@@ -275,6 +275,13 @@ accounts do not use OAuth refresh tokens and are skipped.
 
 ### Signing in
 
+Turntrail checks the provider identity before saving a sign-in. Connecting an account that is
+already registered names its existing card and offers **Sign in to existing account** instead of
+creating another connected copy. Different workspaces with the same email remain separate.
+Codex login runs in a temporary managed directory, so a rejected or cancelled sign-in leaves the
+previous managed and machine-default credentials unchanged. Duplicate repair retains credential
+directories and backs up the registry; it never merges different OAuth sessions automatically.
+
 **Codex** delegates four sign-in methods to the official binary: browser, device code, access token,
 and API key all require `codex` on `PATH`. Turntrail spawns `codex login` with `CODEX_HOME` set and
 reads its output to render progress. It never performs the OAuth exchange. Pasting or choosing an

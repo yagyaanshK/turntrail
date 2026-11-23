@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { runCli, spawnInteractive } from '../src/cli.js';
+import { createAccount, importCodexAuthText, listAccounts } from '../../core/src/index.js';
 
 test('cli init and status write expected output', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-bridge-cli-'));
@@ -64,6 +65,23 @@ test('account maintain can emit JSON for OS schedulers', async () => {
     maintainAccounts: async () => ({ locked: true, results: [] })
   });
   assert.deepEqual(JSON.parse(output), { locked: true, results: [] });
+});
+
+test('CLI duplicate login import rolls back only its new entry and keeps the live login', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'turntrail-cli-duplicate-'));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const defaultHome = path.join(home, '.codex');
+  const options = { home, defaultCodexHome: defaultHome };
+  const auth = '{"tokens":{"access_token":"example-access","account_id":"workspace-a"}}';
+  const original = await createAccount({ label: 'Original' }, options);
+  await importCodexAuthText(original.id, auth, options);
+  await fs.mkdir(defaultHome);
+  await fs.writeFile(path.join(defaultHome, 'auth.json'), auth);
+  await assert.rejects(() => runCli(['account', 'add', 'Copy', '--import'], { stdout: { write() {} } }, {
+    accountOptions: options
+  }), { code: 'DUPLICATE_ACCOUNT' });
+  assert.deepEqual((await listAccounts(options)).map(a => a.id), [original.id]);
+  assert.equal(await fs.readFile(path.join(defaultHome, 'auth.json'), 'utf8'), auth);
 });
 
 function fakeChild(exitCode, signal) {

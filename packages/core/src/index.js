@@ -116,6 +116,7 @@ export {
   refreshCodexAccountIdentity,
   restoreCodexBackup,
   syncActiveCodexAccount,
+  withCodexLoginHome,
   writeCodexTokens
 } from './accounts/codex.js';
 export { refreshCodexToken, CODEX_CLIENT_ID, CODEX_TOKEN_URL } from './accounts/codex-oauth.js';
@@ -204,6 +205,7 @@ export {
   DEFAULT_ACCOUNT_MAINTENANCE_LOCK_TIMEOUT_MS
 } from './accounts/maintenance.js';
 export { readRenewals, renewalJournalPath, tokenFingerprint } from './accounts/renewals.js';
+export { consolidateDuplicateAccount } from './accounts/identity.js';
 export {
   claudeApiHeaders,
   claudeAuthorizeUrl,
